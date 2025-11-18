@@ -46,7 +46,7 @@ export default function Hero() {
             rel="noopener noreferrer"
             className="bg-gray-800 hover:bg-gray-700 text-white px-8 py-4 rounded-lg font-semibold transition-all duration-300 transform hover:scale-105 border border-gray-700"
           >
-            Explore SerDevice
+            Explore Smart Emegency Response Device
           </a>
         </div>
       </div>

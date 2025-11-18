@@ -44,7 +44,7 @@ export default function Footer() {
             <ul className="space-y-2">
               <li>
                 <a href="https://serdevice.xyz" target="_blank" rel="noopener noreferrer" className="text-gray-400 hover:text-cyan-400 transition-colors">
-                  SerDevice
+                  Smart Emegency Response Device
                 </a>
               </li>
               <li><a href="#" className="text-gray-400 hover:text-cyan-400 transition-colors">Coming Soon</a></li>

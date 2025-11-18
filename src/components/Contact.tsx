@@ -9,12 +9,32 @@ export default function Contact() {
     message: '',
   });
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    console.log('Form submitted:', formData);
-    alert('Thank you for reaching out! We will get back to you soon.');
-    setFormData({ name: '', email: '', subject: '', message: '' });
-  };
+  const handleSubmit = async (e: React.FormEvent) => {
+  e.preventDefault();
+
+  try {
+    const response = await fetch("https://www.serd-button.in/api/alessar-contact/", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(formData),
+    });
+
+    const data = await response.json();
+
+    if (data.status === "success") {
+      alert("Thank you for reaching out! We will get back to you soon.");
+      setFormData({ name: '', email: '', subject: '', message: '' });
+    } else {
+      alert("Something went wrong. Please try again.");
+    }
+  } catch (err) {
+    alert("Error sending message.");
+    console.error(err);
+  }
+};
+
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     setFormData({
@@ -49,7 +69,7 @@ export default function Contact() {
                 </div>
                 <div>
                   <h4 className="text-lg font-semibold text-white mb-1">Email Us</h4>
-                  <p className="text-gray-400">info@alessarsolutions.com</p>
+                  <p className="text-gray-400">support@alessarsolutions.in</p>
                 </div>
               </div>
 

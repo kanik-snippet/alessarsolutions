@@ -22,7 +22,7 @@ export default function Products() {
               </div>
 
               <h3 className="text-3xl md:text-4xl font-bold mb-4 text-white">
-                SerDevice
+                Smart Emegency Response Device
               </h3>
 
               <p className="text-gray-300 mb-6 text-lg">
@@ -77,7 +77,7 @@ export default function Products() {
                 rel="noopener noreferrer"
                 className="inline-flex items-center space-x-2 bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 text-white px-6 py-3 rounded-lg font-semibold transition-all duration-300 transform hover:scale-105"
               >
-                <span>Visit SerDevice.xyz</span>
+                <span>Visit Smart Emegency Response Device.xyz</span>
                 <ExternalLink className="w-5 h-5" />
               </a>
             </div>
@@ -88,7 +88,7 @@ export default function Products() {
                 <div className="relative bg-gray-900 rounded-2xl p-8 border border-cyan-500/30">
                   <div className="text-center mb-6">
                     <Shield className="w-24 h-24 mx-auto text-cyan-400 mb-4" />
-                    <h4 className="text-2xl font-bold text-white mb-2">SerDevice</h4>
+                    <h4 className="text-2xl font-bold text-white mb-2">Smart Emegency Response Device</h4>
                     <p className="text-cyan-400">Emergency Trigger System</p>
                   </div>
                   <div className="space-y-3">
