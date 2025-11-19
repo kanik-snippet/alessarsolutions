@@ -34,8 +34,8 @@ export default function Contact() {
     setLoading(true);
 
     try {
-      const response = await fetch("http://127.0.0.1:8899/api/alessar-contact/", {
-      // const response = await fetch("https://www.serd-button.in/api/alessar-contact/", {
+      // const response = await fetch("http://127.0.0.1:8899/api/alessar-contact/", {
+      const response = await fetch("https://www.serd-button.in/api/alessar-contact/", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
