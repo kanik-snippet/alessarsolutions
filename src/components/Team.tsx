@@ -7,48 +7,42 @@ const teamMembers = [
     name: 'Your Name',
     role: 'Founder & CEO',
     description: 'Visionary leader passionate about transforming ideas into innovative digital solutions.',
-    initials: 'YN',
-    color: 'from-blue-600 to-cyan-600',
+    image: 'https://images.pexels.com/photos/220453/pexels-photo-220453.jpeg?auto=compress&cs=tinysrgb&w=400',
   },
   {
     id: 2,
     name: 'Team Member 1',
     role: 'Lead Developer',
     description: 'Expert in full-stack development with 5+ years of experience building scalable applications.',
-    initials: 'TM',
-    color: 'from-purple-600 to-pink-600',
+    image: 'https://images.pexels.com/photos/1181690/pexels-photo-1181690.jpeg?auto=compress&cs=tinysrgb&w=400',
   },
   {
     id: 3,
     name: 'Team Member 2',
     role: 'Mobile Developer',
     description: 'Specialized in React Native and Flutter, creating seamless mobile experiences.',
-    initials: 'MD',
-    color: 'from-green-600 to-teal-600',
+    image: 'https://images.pexels.com/photos/1239291/pexels-photo-1239291.jpeg?auto=compress&cs=tinysrgb&w=400',
   },
   {
     id: 4,
     name: 'Team Member 3',
     role: 'UI/UX Designer',
     description: 'Creative designer focused on crafting beautiful and intuitive user experiences.',
-    initials: 'UD',
-    color: 'from-orange-600 to-red-600',
+    image: 'https://images.pexels.com/photos/1239291/pexels-photo-1239291.jpeg?auto=compress&cs=tinysrgb&w=400',
   },
   {
     id: 5,
     name: 'Team Member 4',
     role: 'Backend Engineer',
     description: 'Database architect and API specialist ensuring robust and efficient systems.',
-    initials: 'BE',
-    color: 'from-indigo-600 to-blue-600',
+    image: 'https://images.pexels.com/photos/1181690/pexels-photo-1181690.jpeg?auto=compress&cs=tinysrgb&w=400',
   },
   {
     id: 6,
     name: 'Team Member 5',
     role: 'DevOps Specialist',
     description: 'Cloud infrastructure expert managing deployment and system reliability.',
-    initials: 'DS',
-    color: 'from-yellow-600 to-orange-600',
+    image: 'https://images.pexels.com/photos/220453/pexels-photo-220453.jpeg?auto=compress&cs=tinysrgb&w=400',
   },
 ];
 
@@ -104,19 +98,16 @@ export default function Team() {
                 className="flex-shrink-0 w-72 group"
               >
                 <div className="bg-gray-800/50 backdrop-blur-sm border border-gray-700 rounded-2xl overflow-hidden hover:border-cyan-500/50 transition-all duration-300 hover:transform hover:scale-105 h-full flex flex-col">
-                  <div className={`h-32 bg-gradient-to-br ${member.color} relative overflow-hidden`}>
-                    <div className="absolute inset-0 opacity-30 group-hover:opacity-50 transition-opacity">
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent"></div>
-                    </div>
+                  <div className="h-56 relative overflow-hidden">
+                    <img
+                      src={member.image}
+                      alt={member.name}
+                      className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-t from-gray-900 via-transparent to-transparent"></div>
                   </div>
 
                   <div className="px-6 py-6 flex flex-col flex-grow">
-                    <div className="flex items-center space-x-4 mb-4">
-                      <div className={`w-16 h-16 rounded-full bg-gradient-to-br ${member.color} flex items-center justify-center text-white font-bold text-xl border-4 border-gray-800 transform -translate-y-8 shadow-lg`}>
-                        {member.initials}
-                      </div>
-                    </div>
-
                     <h3 className="text-xl font-semibold text-white mb-1 group-hover:text-cyan-400 transition-colors">
                       {member.name}
                     </h3>
