@@ -3,6 +3,7 @@ import Services from './components/Services';
 import Products from './components/Products';
 import Technologies from './components/Technologies';
 import About from './components/About';
+import Team from './components/Team';
 import Contact from './components/Contact';
 import Footer from './components/Footer';
 import Navbar from './components/Navbar';
@@ -16,6 +17,7 @@ function App() {
       <Products />
       <Technologies />
       <About />
+      <Team />
       <Contact />
       <Footer />
     </div>
