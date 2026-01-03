@@ -22,7 +22,7 @@ export default function AnimatedBackground() {
       opacity: number;
     }> = [];
 
-    for (let i = 0; i < 100; i++) {
+    for (let i = 0; i < 73; i++) {
       particles.push({
         x: Math.random() * canvas.width,
         y: Math.random() * canvas.height,
