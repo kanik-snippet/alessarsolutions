@@ -4,46 +4,46 @@ import { ChevronLeft, ChevronRight, Linkedin, Github, Mail } from 'lucide-react'
 const teamMembers = [
   {
     id: 1,
-    name: 'Your Name',
+    name: 'Kanik Gupta',
     role: 'Founder & CEO',
-    description: 'Visionary leader passionate about transforming ideas into innovative digital solutions.',
-    image: 'https://images.pexels.com/photos/220453/pexels-photo-220453.jpeg?auto=compress&cs=tinysrgb&w=400',
+    description: 'Founder & CEO with strong hands-on experience as a Senior Developer. Skilled in building scalable web applications and leading technical teams, with deep expertise across modern backend and full-stack technologies.',
+    image: '/team/kanik.jpeg',
   },
   {
     id: 2,
-    name: 'Team Member 1',
-    role: 'Lead Developer',
-    description: 'Expert in full-stack development with 5+ years of experience building scalable applications.',
-    image: 'https://images.pexels.com/photos/1181690/pexels-photo-1181690.jpeg?auto=compress&cs=tinysrgb&w=400',
+    name: 'Akanksha',
+    role: 'Co-Founder',
+    description: 'Co-Founder with solid expertise in frontend development. Experienced in creating clean, responsive, and user-friendly interfaces, with a strong focus on performance and modern UI practices.',
+    image: '/team/akanksha.png',
   },
-  {
-    id: 3,
-    name: 'Team Member 2',
-    role: 'Mobile Developer',
-    description: 'Specialized in React Native and Flutter, creating seamless mobile experiences.',
-    image: 'https://images.pexels.com/photos/1239291/pexels-photo-1239291.jpeg?auto=compress&cs=tinysrgb&w=400',
-  },
+//   {
+//     id: 3,
+//     name: 'Team Member 2',
+//     role: 'Mobile Developer',
+//     description: 'Specialized in React Native and Flutter, creating seamless mobile experiences.',
+//     image: '',
+//   },
   {
     id: 4,
-    name: 'Team Member 3',
-    role: 'UI/UX Designer',
-    description: 'Creative designer focused on crafting beautiful and intuitive user experiences.',
-    image: 'https://images.pexels.com/photos/1239291/pexels-photo-1239291.jpeg?auto=compress&cs=tinysrgb&w=400',
+    name: 'Surya Singh',
+    role: 'HR Manager',
+    description: 'HR Manager known for excellent communication skills and a positive personality. Passionate about people management, team culture, and building a healthy, collaborative work environment.',
+    image: '/team/surya.png',
   },
   {
     id: 5,
-    name: 'Team Member 4',
+    name: 'Anushka',
     role: 'Backend Engineer',
-    description: 'Database architect and API specialist ensuring robust and efficient systems.',
-    image: 'https://images.pexels.com/photos/1181690/pexels-photo-1181690.jpeg?auto=compress&cs=tinysrgb&w=400',
+    description: 'Backend Developer with strong knowledge of server-side architecture, databases, and APIs. Focused on building secure, efficient, and scalable backend systems.',
+    image: '/team/anushka.jpeg',
   },
-  {
-    id: 6,
-    name: 'Team Member 5',
-    role: 'DevOps Specialist',
-    description: 'Cloud infrastructure expert managing deployment and system reliability.',
-    image: 'https://images.pexels.com/photos/220453/pexels-photo-220453.jpeg?auto=compress&cs=tinysrgb&w=400',
-  },
+//   {
+//     id: 6,
+//     name: 'Team Member 5',
+//     role: 'DevOps Specialist',
+//     description: 'Cloud infrastructure expert managing deployment and system reliability.',
+//     image: '',
+//   },
 ];
 
 export default function Team() {
@@ -98,7 +98,7 @@ export default function Team() {
                 className="flex-shrink-0 w-72 group"
               >
                 <div className="bg-gray-800/50 backdrop-blur-sm border border-gray-700 rounded-2xl overflow-hidden hover:border-cyan-500/50 transition-all duration-300 hover:transform hover:scale-105 h-full flex flex-col">
-                  <div className="h-56 relative overflow-hidden">
+                  <div className="h-72 relative overflow-hidden">
                     <img
                       src={member.image}
                       alt={member.name}
@@ -121,14 +121,14 @@ export default function Team() {
 
                     <div className="flex space-x-3 pt-4 border-t border-gray-700">
                       <a
-                        href="#"
+                        href="https://www.linkedin.com/in/bunny0522/"
                         className="flex-1 bg-gray-700/50 hover:bg-gray-700 rounded-lg p-2 flex items-center justify-center transition-colors text-gray-400 hover:text-cyan-400"
                         title="LinkedIn"
                       >
                         <Linkedin className="w-4 h-4" />
                       </a>
                       <a
-                        href="#"
+                        href="https://github.com/kanik-snippet"
                         className="flex-1 bg-gray-700/50 hover:bg-gray-700 rounded-lg p-2 flex items-center justify-center transition-colors text-gray-400 hover:text-cyan-400"
                         title="GitHub"
                       >
