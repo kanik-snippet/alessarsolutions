@@ -37,7 +37,7 @@ const teamMembers = [
   name: 'Aastha Dixit',
   role: 'Lead Developer',
   description: 'Backend Developer with strong knowledge of server-side architecture, databases, and APIs. Focused on building secure, efficient, and scalable backend systems.',
-  image: '/team/aastha.png',
+  image: '/team/aastha.jpeg',
   linkedin: 'https://www.linkedin.com/in/aastha-dixit-958065210/',
   github: 'https://github.com/kanik-snippet',
   email: 'mailto:aaasthadixit@gmail.com',
@@ -49,7 +49,7 @@ const teamMembers = [
     description: 'HR Manager known for excellent communication skills and a positive personality. Passionate about people management, team culture, and building a healthy, collaborative work environment.',
     image: '/team/surya.png',
     linkedin: 'https://www.linkedin.com/in/suryasingh2701/',
-    github: 'https://github.com/kanik-snippet',
+    github: 'https://github.com/Surya-2701',
     email: 'mailto:suryapratap2701@gmail.com',
   },
   {
