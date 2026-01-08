@@ -150,28 +150,32 @@ export default function Team() {
                     </p>
 
                     <div className="flex space-x-3 pt-4 border-t border-gray-700">
-                      <a
-                        href="https://www.linkedin.com/in/bunny0522/"
-                        className="flex-1 bg-gray-700/50 hover:bg-gray-700 rounded-lg p-2 flex items-center justify-center transition-colors text-gray-400 hover:text-cyan-400"
-                        title="LinkedIn"
-                      >
-                        <Linkedin className="w-4 h-4" />
-                      </a>
-                      <a
-                        href="https://github.com/kanik-snippet"
-                        className="flex-1 bg-gray-700/50 hover:bg-gray-700 rounded-lg p-2 flex items-center justify-center transition-colors text-gray-400 hover:text-cyan-400"
-                        title="GitHub"
-                      >
-                        <Github className="w-4 h-4" />
-                      </a>
-                      <a
-                        href="#"
-                        className="flex-1 bg-gray-700/50 hover:bg-gray-700 rounded-lg p-2 flex items-center justify-center transition-colors text-gray-400 hover:text-cyan-400"
-                        title="Email"
-                      >
-                        <Mail className="w-4 h-4" />
-                      </a>
-                    </div>
+  <a
+    href={member.linkedin}
+    target="_blank"
+    className="flex-1 bg-gray-700/50 hover:bg-gray-700 rounded-lg p-2 flex items-center justify-center transition-colors text-gray-400 hover:text-cyan-400"
+  >
+    <Linkedin className="w-4 h-4" />
+  </a>
+
+  {member.github && (
+    <a
+      href={member.github}
+      target="_blank"
+      className="flex-1 bg-gray-700/50 hover:bg-gray-700 rounded-lg p-2 flex items-center justify-center transition-colors text-gray-400 hover:text-cyan-400"
+    >
+      <Github className="w-4 h-4" />
+    </a>
+  )}
+
+  <a
+    href={member.email}
+    className="flex-1 bg-gray-700/50 hover:bg-gray-700 rounded-lg p-2 flex items-center justify-center transition-colors text-gray-400 hover:text-cyan-400"
+  >
+    <Mail className="w-4 h-4" />
+  </a>
+</div>
+
                   </div>
                 </div>
               </div>
