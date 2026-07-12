@@ -22,14 +22,14 @@ export default function AnimatedBackground() {
       opacity: number;
     }> = [];
 
-    for (let i = 0; i < 73; i++) {
+    for (let i = 0; i < 28; i++) {
       particles.push({
         x: Math.random() * canvas.width,
         y: Math.random() * canvas.height,
-        size: Math.random() * 2 + 1,
-        speedX: (Math.random() - 0.5) * 0.5,
-        speedY: (Math.random() - 0.5) * 0.5,
-        opacity: Math.random() * 0.5 + 0.2,
+        size: Math.random() * 1.5 + 0.5,
+        speedX: (Math.random() - 0.5) * 0.2,
+        speedY: (Math.random() - 0.5) * 0.2,
+        opacity: Math.random() * 0.25 + 0.05,
       });
     }
 
@@ -41,7 +41,7 @@ export default function AnimatedBackground() {
       particles.forEach((particle) => {
         ctx.beginPath();
         ctx.arc(particle.x, particle.y, particle.size, 0, Math.PI * 2);
-        ctx.fillStyle = `rgba(56, 189, 248, ${particle.opacity})`;
+        ctx.fillStyle = `rgba(100, 116, 139, ${particle.opacity})`;
         ctx.fill();
 
         particle.x += particle.speedX;
@@ -57,9 +57,9 @@ export default function AnimatedBackground() {
           const dy = p1.y - p2.y;
           const distance = Math.sqrt(dx * dx + dy * dy);
 
-          if (distance < 150) {
+          if (distance < 120) {
             ctx.beginPath();
-            ctx.strokeStyle = `rgba(56, 189, 248, ${0.1 * (1 - distance / 150)})`;
+            ctx.strokeStyle = `rgba(100, 116, 139, ${0.04 * (1 - distance / 120)})`;
             ctx.lineWidth = 1;
             ctx.moveTo(p1.x, p1.y);
             ctx.lineTo(p2.x, p2.y);
@@ -89,7 +89,7 @@ export default function AnimatedBackground() {
     <canvas
       ref={canvasRef}
       className="absolute inset-0 w-full h-full"
-      style={{ background: 'radial-gradient(circle at 50% 50%, #0a192f 0%, #000000 100%)' }}
+      style={{ background: 'linear-gradient(180deg, #0a0a0a 0%, #000000 100%)' }}
     />
   );
 }
