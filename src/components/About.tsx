@@ -1,99 +1,51 @@
-import { Target, Users, Lightbulb, TrendingUp } from 'lucide-react';
+const steps = [
+  'You share the business question — not just a survey wish-list',
+  'We propose method, sample size, timeline, and cost',
+  'Fieldwork runs with regular check-ins along the way',
+  'You receive findings with context, not raw tables only',
+];
 
 export default function About() {
   return (
-    <section id="about" className="py-20 bg-gradient-to-b from-black to-gray-900">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="text-center mb-16">
-          <h2 className="text-4xl md:text-5xl font-bold mb-4 bg-gradient-to-r from-blue-400 to-cyan-400 bg-clip-text text-transparent">
-            About Alessar Solutions
-          </h2>
-          <p className="text-xl text-gray-400 max-w-2xl mx-auto">
-            Your trusted partner in digital transformation
-          </p>
-        </div>
-
-        <div className="grid md:grid-cols-2 gap-12 mb-16">
+    <section id="about" className="py-20 md:py-24 bg-slate-50 border-t border-slate-200/80">
+      <div className="section-wrap">
+        <div className="grid lg:grid-cols-2 gap-12 lg:gap-20">
           <div>
-            <h3 className="text-2xl font-bold text-white mb-4">Who We Are</h3>
-            <p className="text-gray-400 mb-4">
-              Alessar Solutions is a forward-thinking technology company dedicated to transforming ideas into powerful digital solutions. We specialize in creating custom software that drives business growth and innovation.
-            </p>
-            <p className="text-gray-400 mb-4">
-              Our team of experienced developers, designers, and strategists work collaboratively to deliver solutions that exceed expectations. From startups to enterprises, we've helped numerous clients achieve their digital goals.
-            </p>
-            <p className="text-gray-400">
-              We believe in the power of technology to solve real-world problems, and we're committed to building solutions that make a meaningful impact.
-            </p>
+            <h2 className="section-title mb-6">About Alessar Solutions</h2>
+            <div className="space-y-4 text-slate-600 leading-relaxed">
+              <p>
+                We started as a small team running field surveys and client interviews. Over time we built a respondent network across several regions and began taking on larger studies — product launches, category entry research, brand tracking.
+              </p>
+              <p>
+                We are not a big consultancy with layers of account managers. You speak directly with the people running your study. That keeps timelines shorter and the feedback honest.
+              </p>
+              <p>
+                Along the way we picked up development skills because clients often needed a place to host surveys, view results, or share reports. Today we are a research agency first, with technical work when it supports the project.
+              </p>
+            </div>
           </div>
 
           <div className="space-y-6">
-            <div className="flex items-start space-x-4">
-              <div className="w-12 h-12 bg-gradient-to-br from-blue-600 to-cyan-600 rounded-lg flex items-center justify-center flex-shrink-0">
-                <Target className="w-6 h-6 text-white" />
-              </div>
-              <div>
-                <h4 className="text-xl font-semibold text-white mb-2">Our Mission</h4>
-                <p className="text-gray-400">
-                  To empower businesses with innovative technology solutions that drive growth, efficiency, and competitive advantage.
-                </p>
-              </div>
+            <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-soft">
+              <h3 className="font-semibold text-slate-900 mb-4">How we work</h3>
+              <ol className="space-y-3">
+                {steps.map((step, i) => (
+                  <li key={step} className="flex gap-3 text-sm text-slate-600">
+                    <span className="shrink-0 w-6 h-6 rounded-full bg-brand-50 text-brand-700 text-xs font-semibold flex items-center justify-center">
+                      {i + 1}
+                    </span>
+                    <span className="pt-0.5 leading-relaxed">{step}</span>
+                  </li>
+                ))}
+              </ol>
             </div>
 
-            <div className="flex items-start space-x-4">
-              <div className="w-12 h-12 bg-gradient-to-br from-blue-600 to-cyan-600 rounded-lg flex items-center justify-center flex-shrink-0">
-                <Lightbulb className="w-6 h-6 text-white" />
-              </div>
-              <div>
-                <h4 className="text-xl font-semibold text-white mb-2">Our Vision</h4>
-                <p className="text-gray-400">
-                  To be the leading technology partner for businesses seeking innovative and reliable digital solutions.
-                </p>
-              </div>
+            <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-soft">
+              <h3 className="font-semibold text-slate-900 mb-3">Who we work with</h3>
+              <p className="text-sm text-slate-600 leading-relaxed">
+                FMCG brands, startups testing a new market, agencies that need field support, and companies expanding from one country to another. If you need opinions from real people in specific regions, that is usually us.
+              </p>
             </div>
-
-            <div className="flex items-start space-x-4">
-              <div className="w-12 h-12 bg-gradient-to-br from-blue-600 to-cyan-600 rounded-lg flex items-center justify-center flex-shrink-0">
-                <Users className="w-6 h-6 text-white" />
-              </div>
-              <div>
-                <h4 className="text-xl font-semibold text-white mb-2">Our Values</h4>
-                <p className="text-gray-400">
-                  Excellence, innovation, integrity, and customer success are at the core of everything we do.
-                </p>
-              </div>
-            </div>
-
-            <div className="flex items-start space-x-4">
-              <div className="w-12 h-12 bg-gradient-to-br from-blue-600 to-cyan-600 rounded-lg flex items-center justify-center flex-shrink-0">
-                <TrendingUp className="w-6 h-6 text-white" />
-              </div>
-              <div>
-                <h4 className="text-xl font-semibold text-white mb-2">Our Approach</h4>
-                <p className="text-gray-400">
-                  Agile, collaborative, and results-driven methodologies that ensure successful project delivery.
-                </p>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-8 text-center">
-          <div className="bg-gray-800/50 backdrop-blur-sm border border-gray-700 rounded-xl p-6">
-            <div className="text-4xl font-bold text-cyan-400 mb-2">73</div>
-            <div className="text-gray-400">Projects Delivered</div>
-          </div>
-          <div className="bg-gray-800/50 backdrop-blur-sm border border-gray-700 rounded-xl p-6">
-            <div className="text-4xl font-bold text-cyan-400 mb-2">18</div>
-            <div className="text-gray-400">Happy Clients</div>
-          </div>
-          <div className="bg-gray-800/50 backdrop-blur-sm border border-gray-700 rounded-xl p-6">
-            <div className="text-4xl font-bold text-cyan-400 mb-2">24/7</div>
-            <div className="text-gray-400">Support Available</div>
-          </div>
-          <div className="bg-gray-800/50 backdrop-blur-sm border border-gray-700 rounded-xl p-6">
-            <div className="text-4xl font-bold text-cyan-400 mb-2">99%</div>
-            <div className="text-gray-400">Client Satisfaction</div>
           </div>
         </div>
       </div>

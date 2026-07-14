@@ -6,19 +6,21 @@
   scroll-behavior: smooth;
 }
 
-@keyframes gradient {
-  0% {
-    background-position: 0% 50%;
-  }
-  50% {
-    background-position: 100% 50%;
-  }
-  100% {
-    background-position: 0% 50%;
-  }
+body {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
-.animate-gradient {
-  background-size: 200% 200%;
-  animation: gradient 3s ease infinite;
+@layer components {
+  .section-wrap {
+    @apply max-w-6xl mx-auto px-5 sm:px-8 lg:px-10;
+  }
+
+  .section-title {
+    @apply text-3xl sm:text-[2rem] font-semibold text-slate-900 tracking-tight;
+  }
+
+  .section-lead {
+    @apply text-slate-600 text-lg leading-relaxed max-w-2xl;
+  }
 }
