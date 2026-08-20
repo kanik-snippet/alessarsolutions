@@ -73,6 +73,13 @@ ssh root@82.29.166.173 "tail -f /home/api.alessarsolutions.in/app_logs/alessar-w
 ssh root@82.29.166.173 "tail -f /home/api.alessarsolutions.in/app_logs/alessar-mysql.log"
 ```
 
+Trace every request reaching `api.alessarsolutions.in` (real forwarded IP,
+method, URI/query, response status, duration, referrer and user agent):
+
+```bash
+ssh root@82.29.166.173 "tail -F /home/api.alessarsolutions.in/app_logs/alessar-web-access.log"
+```
+
 ## Safe service restarts
 
 Frontend only:

@@ -1,0 +1,12 @@
+/home/api.alessarsolutions.in/app_logs/alessar-web-access.log
+/home/api.alessarsolutions.in/app_logs/alessar-web-error.log {
+    daily
+    rotate 14
+    size 50M
+    missingok
+    notifempty
+    compress
+    delaycompress
+    copytruncate
+    su apial8464 apial8464
+}
