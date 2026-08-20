@@ -138,3 +138,23 @@ class HistoricalRevenueTests(TestCase):
             Decimal(str(response.data["summary"]["total_revenue"])),
             Decimal("75.25"),
         )
+
+    def test_superuser_can_assign_revenue_from_simple_admin_form(self):
+        self.client.force_login(self.owner)
+        add_url = reverse("admin:surveys_historicalrevenuebalance_add")
+
+        form_response = self.client.get(add_url)
+        self.assertEqual(form_response.status_code, 200)
+        self.assertContains(form_response, 'name="user"')
+        self.assertContains(form_response, 'name="amount"')
+        self.assertNotContains(form_response, 'name="currency"')
+        self.assertNotContains(form_response, 'name="effective_at"')
+
+        save_response = self.client.post(
+            add_url,
+            {"user": self.empty_user.pk, "amount": "450.75", "_save": "Save"},
+        )
+        self.assertEqual(save_response.status_code, 302)
+        balance = HistoricalRevenueBalance.objects.get(user=self.empty_user)
+        self.assertEqual(balance.amount, Decimal("450.75"))
+        self.assertEqual(balance.currency, "USD")

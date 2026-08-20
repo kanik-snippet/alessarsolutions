@@ -64,7 +64,9 @@ class HistoricalRevenueBalanceAdmin(admin.ModelAdmin):
     list_display = ["user", "amount", "currency", "effective_at", "updated_at"]
     search_fields = ["user__username", "user__email", "user__first_name", "user__last_name"]
     list_filter = ["currency", "effective_at"]
-    readonly_fields = ["created_at", "updated_at"]
+    autocomplete_fields = ["user"]
+    fields = ["user", "amount"]
+    ordering = ["user__username"]
 
 
 @admin.register(ProfileReuseMonthlyCounter)
