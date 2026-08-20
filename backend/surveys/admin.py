@@ -5,6 +5,7 @@ from django.contrib import admin
 from .models import (
     CanonicalOption,
     CanonicalQuestion,
+    HistoricalRevenueBalance,
     ProviderOptionMapping,
     ProviderQuestionMapping,
     ProfileReuseEvent,
@@ -56,6 +57,14 @@ class SurveyAttemptAdmin(admin.ModelAdmin):
     ]
     list_filter = ["status", "status_source", "supplier_code", "entry_device", "entry_browser", "is_verified", "initiated_at"]
     readonly_fields = [field.name for field in SurveyAttempt._meta.fields]
+
+
+@admin.register(HistoricalRevenueBalance)
+class HistoricalRevenueBalanceAdmin(admin.ModelAdmin):
+    list_display = ["user", "amount", "currency", "effective_at", "updated_at"]
+    search_fields = ["user__username", "user__email", "user__first_name", "user__last_name"]
+    list_filter = ["currency", "effective_at"]
+    readonly_fields = ["created_at", "updated_at"]
 
 
 @admin.register(ProfileReuseMonthlyCounter)

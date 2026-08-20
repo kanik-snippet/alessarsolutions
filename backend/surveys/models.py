@@ -503,6 +503,32 @@ class SurveyAttempt(models.Model):
         return max(0, int((ended_at - self.loi_started_at).total_seconds()))
 
 
+class HistoricalRevenueBalance(models.Model):
+    """One exact opening-revenue balance imported from a legacy tool."""
+
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="historical_revenue_balance",
+    )
+    amount = models.DecimalField(
+        max_digits=18,
+        decimal_places=2,
+        validators=[MinValueValidator(0)],
+    )
+    currency = models.CharField(max_length=3, default="USD")
+    effective_at = models.DateTimeField(default=timezone.now, db_index=True)
+    note = models.CharField(max_length=240, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["user_id"]
+
+    def __str__(self):
+        return f"{self.user} · {self.currency} {self.amount}"
+
+
 class ProfileReuseMonthlyCounter(models.Model):
     """Concurrency-safe monthly client budget for previously registered UIDs."""
 

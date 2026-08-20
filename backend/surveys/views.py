@@ -66,6 +66,7 @@ from .dashboard import (
 )
 from .excel import ExcelSheet, build_excel_response
 from .integrations import InnovateMRAPIError, InnovateMRClient
+from .historical_revenue import historical_revenue_total
 from .models import CanonicalQuestion, ProviderQuestionMapping, Survey, SurveyAttempt, SyncRun
 from .outcomes import provider_outcome
 from .report_pricing import (
@@ -2641,6 +2642,10 @@ class SurveyAttemptViewSet(viewsets.ReadOnlyModelViewSet):
         classified = summary["desktop"] + summary["mobile"] + summary["tablet"]
         summary["total_revenue"] = visible_amount_for_user(
             self.request.user, summary["total_revenue"]
+        )
+        summary["total_revenue"] += historical_revenue_total(
+            self.request.user,
+            self.request.query_params,
         )
         card_access = _component_access(
             effective_permission_codes(self.request.user), STUDY_CARD_PERMISSIONS
