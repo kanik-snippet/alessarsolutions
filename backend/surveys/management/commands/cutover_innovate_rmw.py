@@ -52,6 +52,10 @@ class Command(BaseCommand):
             raise CommandError("The cutover token environment variable is not configured.")
         client = self._client(str(options["client"]).strip())
         name = str(options["integration_name"]).strip()
+        detail_integration = ClientIntegration.objects.filter(
+            client=client,
+            provider_code="innovatemr",
+        ).order_by("pk").first()
         integration, _ = ClientIntegration.objects.get_or_create(
             client=client,
             name=name,
@@ -77,6 +81,8 @@ class Command(BaseCommand):
             "max_pages": 100,
             "detail_refresh_batch": 20,
         }
+        if detail_integration is not None:
+            integration.config["detail_integration_id"] = detail_integration.pk
         integration.save()
         set_integration_token(integration, token)
 

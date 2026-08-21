@@ -257,7 +257,7 @@ def refresh_client_integration_details(integration: ClientIntegration, *, limit=
         integration=integration,
         status=Survey.Status.LIVE,
     )
-    if integration.provider_code in {"cint", "enligne"}:
+    if integration.provider_code in {"cint", "enligne", "rmwinsights"}:
         # These inventory feeds do not carry complete targeting/quota detail.
         # Rotate through the oldest snapshots so detail hydration continues
         # after the initial backfill without creating an API request burst.

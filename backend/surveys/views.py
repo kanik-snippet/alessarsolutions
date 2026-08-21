@@ -2596,7 +2596,7 @@ class SurveyViewSet(viewsets.ReadOnlyModelViewSet):
         )
         if (
             survey.integration_id
-            and survey.integration.provider_code == "cint"
+            and survey.integration.provider_code in {"cint", "rmwinsights"}
             and synced_at is not None
             and synced_at < timezone.now() - timedelta(seconds=60)
         ):

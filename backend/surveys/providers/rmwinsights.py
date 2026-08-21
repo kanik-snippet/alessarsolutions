@@ -6,12 +6,12 @@ import re
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import requests
-from django.db import transaction
-from django.utils import timezone
 
-from surveys.mappings import sync_survey_mappings
-from surveys.models import Survey, SurveyQuota, TargetingQuestion
+from surveys.integrations import InnovateMRClient
+from surveys.models import Survey
+from surveys.services import replace_survey_details
 from vendors.credentials import resolve_integration_token
+from vendors.models import ClientIntegration
 
 from .base import (
     NormalizedSurvey,
@@ -46,7 +46,7 @@ class RMWInsightsProvider(SurveyProvider):
     minimum_sync_interval_seconds = 60
     credential_fields = (("token", "X-API-Key"),)
 
-    def __init__(self, integration, *, session=None):
+    def __init__(self, integration, *, session=None, detail_client=None):
         super().__init__(integration, session=session or requests.Session())
         self.api_key = resolve_integration_token(integration)
         if not self.api_key:
@@ -67,6 +67,27 @@ class RMWInsightsProvider(SurveyProvider):
         self.timeout = max(5, min(int(config.get("timeout_seconds", 30)), 120))
         self.page_size = max(1, min(int(config.get("page_size", 100)), 100))
         self.max_pages = max(1, min(int(config.get("max_pages", 100)), 200))
+        self.detail_client = detail_client
+
+    def _innovate_client(self):
+        """Use the legacy direct Innovate account only for quota/targeting."""
+
+        if self.detail_client is not None:
+            return self.detail_client
+        configured_id = (self.integration.config or {}).get("detail_integration_id")
+        integrations = ClientIntegration.objects.filter(
+            client_id=self.integration.client_id,
+            provider_code="innovatemr",
+        ).exclude(pk=self.integration.pk)
+        if configured_id:
+            integrations = integrations.filter(pk=configured_id)
+        detail_integration = integrations.order_by("pk").first()
+        if detail_integration is None:
+            raise ProviderConfigurationError(
+                "RMW Insights requires the client's legacy InnovateMR integration for live details."
+            )
+        self.detail_client = InnovateMRClient(integration=detail_integration)
+        return self.detail_client
 
     def _get(self, url, *, params=None):
         try:
@@ -229,67 +250,15 @@ class RMWInsightsProvider(SurveyProvider):
             },
         )
 
-    def _details(self, remote_project_id):
-        if not re.fullmatch(r"\d{14}", str(remote_project_id or "")):
-            raise ProviderError("RMW Insights survey has no valid remote project ID.")
-        return self._get(f"{self.base_url}/{remote_project_id}/")
-
     def refresh_details(self, survey):
-        details = self._details((survey.raw_data or {}).get("remote_project_id") or survey.source_key)
-        questions = []
-        for row in details.get("targeting_questions") or []:
-            if not isinstance(row, dict):
-                continue
-            question_id = self._integer(row.get("question_id"), None)
-            if question_id is None:
-                continue
-            questions.append(TargetingQuestion(
-                survey=survey,
-                question_id=question_id,
-                key=str(row.get("key") or ""),
-                text=str(row.get("text") or ""),
-                question_type=str(row.get("question_type") or ""),
-                category=str(row.get("category") or ""),
-                options=row.get("options") if isinstance(row.get("options"), list) else [],
-                raw_data={**row, "provider": self.code},
-            ))
-        quotas = []
-        for index, row in enumerate(details.get("quotas") or []):
-            if not isinstance(row, dict):
-                continue
-            quota_id = self._integer(row.get("quota_id"), None)
-            source_key = str(row.get("quota_id") or row.get("id") or f"rmw-{index}")
-            quotas.append(SurveyQuota(
-                survey=survey,
-                source_key=source_key,
-                quota_id=quota_id,
-                title=str(row.get("title") or row.get("display_name") or ""),
-                name=str(row.get("name") or row.get("display_name") or ""),
-                sample_size=self._integer(row.get("sample_size")),
-                remaining=self._integer(row.get("remaining")),
-                completes=self._integer(row.get("completes")),
-                clicks=self._integer(row.get("clicks")),
-                status=str(row.get("status") or ""),
-                targeting=row.get("targeting") if isinstance(row.get("targeting"), dict) else {},
-                raw_data={**row, "provider": self.code},
-            ))
-        now = timezone.now()
-        entry_link = self._entry_link(details)
-        with transaction.atomic():
-            survey.targeting_questions.all().delete()
-            survey.quotas.all().delete()
-            TargetingQuestion.objects.bulk_create(questions)
-            SurveyQuota.objects.bulk_create(quotas)
-            survey.entry_link = entry_link
-            survey.has_quota = bool(quotas)
-            survey.targeting_synced_at = now
-            survey.quota_synced_at = now
-            survey.detail_synced_at = now
-            survey.save(update_fields=[
-                "entry_link", "has_quota", "targeting_synced_at", "quota_synced_at",
-                "detail_synced_at", "updated_at",
-            ])
-        sync_survey_mappings(survey)
+        # Inventory, CPI and respondent URL remain authoritative from RMW.
+        # Only the derived live quota and pre-screener collections come from
+        # the original InnovateMR API keyed by the actual numeric survey ID.
+        replace_survey_details(self._innovate_client(), survey)
+        has_quota = survey.quotas.exists()
+        if survey.has_quota != has_quota:
+            survey.has_quota = has_quota
+            survey.save(update_fields=["has_quota", "updated_at"])
 
     def build_outbound_url(self, survey, attempt, answers):
         parts = urlsplit(self._entry_link({"supplier_entry_link": survey.entry_link}))

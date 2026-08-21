@@ -113,11 +113,18 @@ class RMWInsightsDetailsTests(TestCase):
         self.client_record = Client.objects.create(
             code="rmw-details", name="InnovateMR", provider_code="innovatemr"
         )
+        self.detail_integration = ClientIntegration.objects.create(
+            client=self.client_record,
+            name="Legacy Innovate details",
+            provider_code="innovatemr",
+            base_url="https://supplier.innovatemr.net/api/v2",
+        )
         self.integration = ClientIntegration.objects.create(
             client=self.client_record,
             name="RMW live",
             provider_code="rmwinsights",
             base_url="https://api.rmwinsights.com/api/v1/surveys/",
+            config={"detail_integration_id": self.detail_integration.pk},
         )
         self.survey = Survey.objects.create(
             client=self.client_record,
@@ -130,28 +137,37 @@ class RMWInsightsDetailsTests(TestCase):
         )
 
     @patch("surveys.providers.rmwinsights.resolve_integration_token", return_value="secret")
-    def test_refresh_details_replaces_quota_and_targeting(self, _token):
-        response = Mock()
-        response.raise_for_status.return_value = None
-        response.json.return_value = {
-            **remote_row(),
-            "quotas": [{
-                "id": 44, "quota_id": 9001, "name": "Total", "sample_size": 175,
-                "remaining": 170, "completes": 5, "clicks": 12, "status": "Open",
-                "targeting": {"questions": []},
-            }],
-            "targeting_questions": [{
-                "id": 8, "question_id": 59, "key": "GENDER",
-                "text": "What is your gender?", "question_type": "single",
-                "category": "Profile", "options": [
-                    {"OptionId": "1", "OptionText": "Male"},
-                ],
-            }],
-        }
-        session = Mock()
-        session.get.return_value = response
+    def test_live_detail_client_uses_configured_legacy_innovate_integration(self, _token):
+        provider = RMWInsightsProvider(self.integration, session=Mock())
 
-        RMWInsightsProvider(self.integration, session=session).refresh_details(self.survey)
+        detail_client = provider._innovate_client()
+
+        self.assertEqual(detail_client.integration, self.detail_integration)
+        self.assertEqual(detail_client.provider_code, "innovatemr")
+
+    @patch("surveys.providers.rmwinsights.resolve_integration_token", return_value="secret")
+    def test_refresh_details_uses_legacy_innovate_api_and_preserves_rmw_link(self, _token):
+        detail_client = Mock()
+        detail_client.is_biobrain = False
+        detail_client.get_quota_for_survey.return_value = [{
+            "_id": "quota-9001", "id": 9001, "quotaName": "Total",
+            "quotaN": 175, "RemainingN": 170, "cmp": 5, "clk": 12,
+            "quotaStatus": "Open", "targeting": {"Conditions": []},
+        }]
+        detail_client.get_survey_targeting.return_value = [{
+            "QuestionId": 59, "QuestionKey": "GENDER",
+            "QuestionText": "What is your gender?", "QuestionType": "single",
+            "QuestionCategory": "Profile", "Options": [
+                {"OptionId": "1", "OptionText": "Male"},
+            ],
+        }]
+        original_link = self.survey.entry_link
+
+        RMWInsightsProvider(
+            self.integration,
+            session=Mock(),
+            detail_client=detail_client,
+        ).refresh_details(self.survey)
 
         self.survey.refresh_from_db()
         self.assertEqual(self.survey.quotas.count(), 1)
@@ -159,7 +175,9 @@ class RMWInsightsDetailsTests(TestCase):
         self.assertEqual(self.survey.targeting_questions.get().question_id, 59)
         self.assertTrue(self.survey.has_quota)
         self.assertIsNotNone(self.survey.detail_synced_at)
-        self.assertTrue(session.get.call_args.args[0].endswith("/20260800002961/"))
+        self.assertEqual(self.survey.entry_link, original_link)
+        detail_client.get_quota_for_survey.assert_called_once_with(16120319)
+        detail_client.get_survey_targeting.assert_called_once_with(16120319)
 
 
 class InnovateRMWCutoverTests(TestCase):
