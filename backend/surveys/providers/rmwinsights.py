@@ -68,6 +68,7 @@ class RMWInsightsProvider(SurveyProvider):
         self.page_size = max(1, min(int(config.get("page_size", 100)), 100))
         self.max_pages = max(1, min(int(config.get("max_pages", 100)), 200))
         self.detail_client = detail_client
+        self.attempts_url = self.base_url.rsplit("/", 1)[0] + "/survey-attempts"
 
     def _innovate_client(self):
         """Use the legacy direct Innovate account only for quota/targeting."""
@@ -135,6 +136,30 @@ class RMWInsightsProvider(SurveyProvider):
         raise ProviderError(
             "RMW Insights inventory exceeded the configured pagination safety limit."
         )
+
+    def remote_attempt(self, remote_rid):
+        """Read one RMW journey by its public 10-character RID."""
+
+        remote_rid = str(remote_rid or "").strip()
+        if not re.fullmatch(r"[A-Za-z0-9]{10}", remote_rid):
+            raise ProviderError("RMW Insights callback has an invalid remote RID.")
+        payload = self._get(f"{self.attempts_url}/{remote_rid}/")
+        if str(payload.get("rid") or "") != remote_rid:
+            raise ProviderError("RMW Insights returned a mismatched remote attempt.")
+        return payload
+
+    def recent_attempts(self, limit=100):
+        """Return a bounded newest-first window for missed-callback recovery."""
+
+        page_size = max(1, min(int(limit), 100))
+        payload = self._get(
+            self.attempts_url + "/",
+            params={"page": 1, "page_size": page_size, "ordering": "-initiated_at"},
+        )
+        rows = payload.get("results")
+        if not isinstance(rows, list):
+            raise ProviderError("RMW Insights attempt response has no results list.")
+        return [row for row in rows if isinstance(row, dict)]
 
     @staticmethod
     def _integer(value, default=0):

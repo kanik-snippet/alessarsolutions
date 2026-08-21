@@ -121,6 +121,10 @@ def sync_client_integration_task(integration_id):
             if integration.provider_code == "cint":
                 sync_cint_redirects_task.delay(integration.pk)
                 summary["redirect_updates_queued"] = True
+            elif integration.provider_code == "rmwinsights":
+                from .rmw_callbacks import reconcile_recent_attempts
+
+                summary.update(reconcile_recent_attempts(integration, limit=100))
             return summary
         api = InnovateMRClient(integration=integration)
         summary = sync_surveys(api, integration=integration).__dict__

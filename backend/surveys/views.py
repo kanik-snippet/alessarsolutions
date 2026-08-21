@@ -2309,6 +2309,18 @@ def survey_status(request):
             attempt = attempts.filter(
                 provider_profile_uid__in=callback_identifiers
             ).order_by("-initiated_at").first()
+    rmw_callback = {}
+    if attempt is None:
+        try:
+            from .rmw_callbacks import resolve_remote_callback
+
+            attempt, rmw_callback = resolve_remote_callback(
+                callback_identifier,
+                status_code,
+                request_ip=get_request_ip(request),
+            )
+        except Exception:
+            logger.exception("Could not resolve RMW callback RID=%s", callback_identifier)
     canonical_rid = attempt.rid if attempt else callback_identifier
     provider_code = (
         attempt.survey.integration.provider_code
@@ -2345,7 +2357,9 @@ def survey_status(request):
                 attempt.exit_device = exit_client_data.get("device", "")
                 attempt.exit_os = exit_client_data.get("os", "")
                 attempt.exit_client_data = exit_client_data
-                attempt.status_source = "browser_callback"
+                attempt.status_source = (
+                    "rmwinsights_callback" if rmw_callback else "browser_callback"
+                )
             update_fields = [
                 "callback_at", "callback_ip", "loi_seconds", "status",
                 "exit_user_agent", "exit_browser", "exit_device", "exit_os",
@@ -2368,6 +2382,10 @@ def survey_status(request):
                     **(attempt.upstream_transaction_data or {}),
                     audit_key: callback_data,
                 }
+                if rmw_callback:
+                    audit["rmwinsights_callback"] = rmw_callback
+                    attempt.is_verified = bool(rmw_callback.get("is_verified"))
+                    update_fields.append("is_verified")
                 if provider_code == "rfg":
                     audit["rfg_outcome"] = describe_rfg_outcome(
                         callback_data, attempt=attempt

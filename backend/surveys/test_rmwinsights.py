@@ -1,9 +1,11 @@
+from datetime import timedelta
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 from urllib.parse import parse_qs, urlsplit
 
 from django.core.management import call_command
 from django.test import SimpleTestCase, TestCase
+from django.urls import reverse
 from django.utils import timezone
 
 from vendors.models import Client, ClientIntegration
@@ -107,6 +109,25 @@ class RMWInsightsProviderTests(SimpleTestCase):
         self.assertEqual(query["token"], ["signed-token"])
         self.assertEqual(query["survey"], ["20260800002961"])
 
+    @patch("surveys.providers.rmwinsights.resolve_integration_token", return_value="secret")
+    def test_remote_attempt_uses_authenticated_attempt_detail_endpoint(self, _token):
+        response = Mock()
+        response.raise_for_status.return_value = None
+        response.json.return_value = {"rid": "lGmOI3Sfo3", "status": "4"}
+        session = Mock()
+        session.get.return_value = response
+
+        payload = RMWInsightsProvider(self.integration(), session=session).remote_attempt(
+            "lGmOI3Sfo3"
+        )
+
+        self.assertEqual(payload["status"], "4")
+        self.assertEqual(
+            session.get.call_args.args[0],
+            "https://api.rmwinsights.com/api/v1/survey-attempts/lGmOI3Sfo3/",
+        )
+        self.assertEqual(session.get.call_args.kwargs["headers"]["X-API-Key"], "secret")
+
 
 class RMWInsightsDetailsTests(TestCase):
     def setUp(self):
@@ -178,6 +199,83 @@ class RMWInsightsDetailsTests(TestCase):
         self.assertEqual(self.survey.entry_link, original_link)
         detail_client.get_quota_for_survey.assert_called_once_with(16120319)
         detail_client.get_survey_targeting.assert_called_once_with(16120319)
+
+    @patch("surveys.rmw_callbacks.get_provider")
+    def test_unknown_remote_rid_is_attached_to_matching_local_attempt(self, get_provider):
+        started = timezone.now() - timedelta(seconds=30)
+        attempt = SurveyAttempt.objects.create(
+            rid="U9iQZJChXS",
+            survey=self.survey,
+            client=self.client_record,
+            user_id="respondent-1",
+            status=SurveyAttempt.Status.REDIRECTED,
+            initiation_ip="74.109.113.243",
+            initiated_at=started,
+        )
+        get_provider.return_value.remote_attempt.return_value = {
+            "rid": "lGmOI3Sfo3",
+            "pid": "ZbOG7dliS",
+            "status": "4",
+            "survey_source_id": "16120319",
+            "entry_ip": "74.109.113.243",
+            "initiated_at": (started + timedelta(seconds=19)).isoformat(),
+            "callback_at": timezone.now().isoformat(),
+            "callback_ip": "52.207.183.194",
+            "status_source": "innovatemr_hash_rejected",
+            "is_verified": False,
+        }
+
+        response = self.client.get(
+            reverse("survey-status"),
+            {"status": "4", "rid": "lGmOI3Sfo3"},
+            REMOTE_ADDR="74.109.113.243",
+        )
+
+        attempt.refresh_from_db()
+        self.assertEqual(response.status_code, 302)
+        self.assertIn(f"status=4&pid={attempt.pid}", response.url)
+        self.assertEqual(attempt.status, SurveyAttempt.Status.QUALITY_TERMINATED)
+        self.assertEqual(attempt.status_source, "rmwinsights_callback")
+        self.assertEqual(attempt.callback_count, 1)
+        self.assertEqual(
+            attempt.upstream_transaction_data["rmwinsights_callback"]["rid"],
+            "lGmOI3Sfo3",
+        )
+
+    @patch("surveys.rmw_callbacks.get_provider")
+    def test_reconciliation_recovers_a_missed_terminal_callback(self, get_provider):
+        from .rmw_callbacks import reconcile_recent_attempts
+
+        started = timezone.now() - timedelta(minutes=1)
+        callback_at = timezone.now()
+        attempt = SurveyAttempt.objects.create(
+            rid="Local4Rid7",
+            survey=self.survey,
+            client=self.client_record,
+            user_id="respondent-2",
+            status=SurveyAttempt.Status.REDIRECTED,
+            initiation_ip="74.109.113.243",
+            initiated_at=started,
+        )
+        get_provider.return_value.recent_attempts.return_value = [{
+            "rid": "Remote4Rid",
+            "status": "4",
+            "survey_source_id": "16120319",
+            "entry_ip": "74.109.113.243",
+            "initiated_at": (started + timedelta(seconds=15)).isoformat(),
+            "callback_at": callback_at.isoformat(),
+            "callback_ip": "52.207.183.194",
+            "is_verified": False,
+        }]
+
+        result = reconcile_recent_attempts(self.integration)
+
+        attempt.refresh_from_db()
+        self.assertEqual(result, {"reconciled": 1})
+        self.assertEqual(attempt.status, SurveyAttempt.Status.QUALITY_TERMINATED)
+        self.assertEqual(attempt.status_source, "rmwinsights_api_reconcile")
+        self.assertEqual(attempt.callback_ip, "52.207.183.194")
+        self.assertEqual(attempt.callback_count, 1)
 
 
 class InnovateRMWCutoverTests(TestCase):
