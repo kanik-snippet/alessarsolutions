@@ -1,4 +1,4 @@
-# Vendor, client, quantity and CPI operations
+# Supplier, client, API and CPI operations
 
 This feature is additive and is now part of the main application. Vendor allocation is enforced in project listing, copied-link validation, respondent initiation, callback finalization and legacy callback reconciliation.
 
@@ -31,9 +31,9 @@ Organization structure totals roll upward without copying access rows: a Shift's
 1. `Client` identifies a buyer/source account.
 2. `ClientIntegration` stores non-secret upstream connection metadata. It stores the environment-variable name for a credential, never the token.
 3. `VendorCommercialProfile` stores a vendor's default CPI cut, currency and delivery mode (`panel`, `api` or `both`). Internal vendors are always panel-only with zero cut.
-4. `VendorClientAllocation` makes a client eligible for project assignment and limits total completes across that client's allocated projects. It does not expose every client survey.
-5. `VendorSurveyAllocation` is a mandatory project whitelist entry inside the parent client allocation. It controls project visibility, the per-project complete cap and an optional CPI-cut override. Without an active allocation, that project is absent from both panel and API responses and its respondent link is rejected.
-6. `AllocationReservation` records the reserved, consumed, released or expired quantity associated with one survey attempt.
+4. `VendorClientAllocation` assigns a client and automatically includes all of its current and future live projects.
+5. `VendorSurveyAllocation` is an optional project rule. An inactive rule excludes that project; an active rule may override its CPI cut or active window.
+6. `AllocationReservation` is an allocation audit row for one survey attempt. Local supplier quantity caps are not enforced; upstream survey availability remains authoritative.
 
 ## CPI precedence and snapshot
 
@@ -66,18 +66,15 @@ or:
 Authorization: Api-Key exh_...
 ```
 
-The key authenticates as its external vendor. It does not carry a copied client list or copied CPI: every request applies that vendor's current function permissions, active client grants, explicit project allocations, quantities and per-client/project CPI cut. The same external vendor can therefore receive selected Client ABC projects at 30% cut and selected Client BCZ projects at 50% cut in both panel and API responses. `/api/v1/surveys/?client_name=ABC` filters the allocated client label.
+The key authenticates as its external vendor. Every request applies its current function permissions, selected active client grants, project exclusions and per-client/project CPI cut. The default feed exposes the Alessar Project ID as `source_id`; each key can instead expose the upstream survey ID. `/api/v1/surveys/?client_name=ABC` filters the allocated client label.
 
-## Quantity lifecycle
+Each key can hold four supplier outcome URLs (completed, terminated, quota full and quality terminated). External start links contain a `{supplier_uid}` placeholder. The final supplier redirect includes `status`, `supplier_uid`, `project_id`, `survey_id`, Alessar `rid`, `term_reason` and `term_category`.
 
-The reservation service locks the client row and mandatory project-allocation row in one database transaction. Capacity is available only when client remaining, project remaining and upstream survey remaining are all positive.
+Optional supplier hash verification is disabled by default. When enabled, a separate `vrh_...` hash is displayed once and the start-link template also contains `{hash_key}`. Missing or incorrect hashes are rejected before an attempt is created. The database stores only its HMAC digest and masked identifier.
 
-- Initiation: reserve one client unit and one project-allocation unit.
-- Status `1`: move the reserved unit to consumed.
-- Status `2`, `3` or `4`: release the reserved unit.
-- Abandoned attempt: `vendors.expire_allocation_reservations` runs every `VENDOR_RESERVATION_CLEANUP_INTERVAL_SECONDS` and releases reservations older than `VENDOR_RESERVATION_TTL_MINUTES`.
+## Allocation audit lifecycle
 
-Finalization is idempotent. Database check constraints prevent consumed or reserved counters from exceeding their limits.
+Initiation freezes the effective client/project/CPI context and creates one audit row. Status `1` finalizes it as consumed; statuses `2`, `3` and `4` finalize it as released. Abandoned rows expire through the existing cleanup task. Finalization is idempotent and does not maintain supplier quantity counters.
 
 ## UAT API
 
@@ -86,7 +83,7 @@ All endpoints require function permissions and are documented in Swagger:
 - `/api/v1/vendors/clients/`
 - `/api/v1/vendors/integrations/`
 - `/api/v1/vendors/commercial-profiles/`
-- `/api/v1/vendors/api-keys/` (issue, list masked metadata, update label/expiry and revoke)
+- `/api/v1/vendors/api-keys/` (issue, configure ID mode/hash/redirects, list masked metadata and revoke)
 - `/api/v1/vendors/client-allocations/`
 - `/api/v1/vendors/survey-allocations/`
 - `/api/v1/vendors/reservations/` (read-only audit)
@@ -96,8 +93,8 @@ All endpoints require function permissions and are documented in Swagger:
 - `/api/v1/vendors/organization-client-access/` (unit client visibility CRUD)
 - `/api/v1/vendors/organization-options/` (scoped owner/client selector data)
 
-The responsive `/vendors/` workspace uses separate modals for commercial policy, client allocation, project allocation and API-key operations. `/organization/` manages Branch, Sub-branch, Shift and inherited client routing without horizontal page overflow. User creation stays in the Access Control modal and selects a real organization unit, so account type, role, hierarchy and function-level allow/deny overrides have one source of truth.
+The responsive `/vendors/` workspace uses separate modals for commercial policy, client allocation, project exclusion and API-key/redirect operations. `/organization/` manages Branch, Sub-branch, Shift and inherited client routing without horizontal page overflow. User creation stays in the Access Control modal and selects a real organization unit, so account type, role, hierarchy and function-level allow/deny overrides have one source of truth.
 
-Super admins and non-vendor management accounts see the full authorized dataset. Vendor accounts and respondents below an internal vendor are restricted to that vendor's allocations. Commercial policies, quantities and API keys remain owner-controlled and read-only for vendor-scoped accounts, even if a manage permission is assigned accidentally.
+Super admins and non-vendor management accounts see the full authorized dataset. Vendor accounts and respondents below an internal vendor are restricted to that vendor's allocations. Commercial policies, exclusions and API keys remain owner-controlled and read-only for vendor-scoped accounts, even if a manage permission is assigned accidentally.
 
 The first migrations map existing `company_name=InnovateMR` surveys to a seeded InnovateMR client without changing survey IDs, source CPI or respondent flow. Every later InnovateMR inventory sync applies the same client mapping, and its closed-survey pass cannot close inventory belonging to a future provider.

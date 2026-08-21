@@ -73,16 +73,10 @@ class PurgeCintDataCommandTests(TestCase):
         self.client_allocation = VendorClientAllocation.objects.create(
             vendor=self.user,
             client=self.cint_client,
-            quantity_limit=10,
-            reserved_quantity=1,
-            consumed_quantity=2,
         )
         self.survey_allocation = VendorSurveyAllocation.objects.create(
             client_allocation=self.client_allocation,
             survey=self.cint_survey,
-            quantity_limit=10,
-            reserved_quantity=1,
-            consumed_quantity=2,
         )
         self.cint_attempt = SurveyAttempt.objects.create(
             rid="CintRid001",
@@ -181,9 +175,6 @@ class PurgeCintDataCommandTests(TestCase):
         self.assertIsNone(self.email_identity.assigned_uid)
         self.assertEqual(self.email_identity.use_count, 0)
 
-        self.client_allocation.refresh_from_db()
-        self.assertEqual(self.client_allocation.reserved_quantity, 0)
-        self.assertEqual(self.client_allocation.consumed_quantity, 0)
         self.cint_integration.refresh_from_db()
         self.assertFalse(self.cint_integration.is_active)
         self.assertFalse(self.cint_integration.scheduled_sync_enabled)

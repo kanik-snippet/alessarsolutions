@@ -8,6 +8,7 @@ from django.conf import settings
 
 
 API_KEY_PREFIX = "exh_"
+REDIRECT_HASH_PREFIX = "vrh_"
 
 
 def digest_api_key(raw_key: str) -> str:
@@ -20,4 +21,9 @@ def digest_api_key(raw_key: str) -> str:
 
 def generate_api_key() -> tuple[str, str, str, str]:
     raw_key = f"{API_KEY_PREFIX}{secrets.token_urlsafe(36)}"
+    return raw_key, raw_key[:12], raw_key[-4:], digest_api_key(raw_key)
+
+
+def generate_redirect_hash() -> tuple[str, str, str, str]:
+    raw_key = f"{REDIRECT_HASH_PREFIX}{secrets.token_urlsafe(30)}"
     return raw_key, raw_key[:12], raw_key[-4:], digest_api_key(raw_key)

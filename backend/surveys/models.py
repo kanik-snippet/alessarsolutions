@@ -444,6 +444,20 @@ class SurveyAttempt(models.Model):
         related_name="attempts",
         on_delete=models.PROTECT,
     )
+    vendor_api_key = models.ForeignKey(
+        "vendors.VendorAPIKey",
+        null=True,
+        blank=True,
+        related_name="attempts",
+        on_delete=models.PROTECT,
+        help_text="External supplier API key that issued this respondent link.",
+    )
+    supplier_respondent_id = models.CharField(
+        max_length=160,
+        blank=True,
+        db_index=True,
+        help_text="Supplier's respondent identifier returned on its configured outcome URL.",
+    )
     user_id = models.CharField(max_length=160, db_index=True)
     supplier_code = models.CharField(max_length=40, blank=True)
     source_cpi_snapshot = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)

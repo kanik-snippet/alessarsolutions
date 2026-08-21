@@ -696,6 +696,9 @@ class VendorAPIKeySerializer(serializers.ModelSerializer):
     account_type = serializers.CharField(source="vendor.employee_profile.account_type", read_only=True)
     masked_key = serializers.CharField(read_only=True)
     api_key = serializers.CharField(read_only=True, required=False)
+    redirect_hash_key = serializers.CharField(read_only=True, required=False)
+    masked_redirect_hash = serializers.CharField(read_only=True)
+    generate_redirect_hash = serializers.BooleanField(write_only=True, required=False, default=False)
     created_by = serializers.CharField(source="created_by.username", read_only=True, allow_null=True)
     client_allocations = serializers.PrimaryKeyRelatedField(
         many=True,
@@ -707,7 +710,10 @@ class VendorAPIKeySerializer(serializers.ModelSerializer):
         model = VendorAPIKey
         fields = [
             "id", "vendor", "vendor_name", "account_type", "name", "prefix", "last_four", "masked_key",
-            "api_key", "client_allocations", "client_names", "is_active", "expires_at",
+            "api_key", "survey_id_mode", "client_allocations", "client_names",
+            "redirect_hash_required", "masked_redirect_hash", "redirect_hash_key", "generate_redirect_hash",
+            "completed_redirect_url", "terminated_redirect_url", "quota_full_redirect_url", "quality_redirect_url",
+            "is_active", "expires_at",
             "last_used_at", "revoked_at", "created_by",
             "created_at", "updated_at",
         ]
@@ -750,23 +756,62 @@ class VendorAPIKeySerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({
                 "client_allocations": "Every selected client allocation must be active and belong to this supplier."
             })
+        hash_required = attrs.get(
+            "redirect_hash_required",
+            getattr(self.instance, "redirect_hash_required", False),
+        )
+        generate_hash = attrs.get("generate_redirect_hash", False)
+        has_hash = bool(getattr(self.instance, "redirect_hash_hash", ""))
+        if hash_required and not (generate_hash or has_hash):
+            raise serializers.ValidationError({
+                "generate_redirect_hash": "Generate a redirect hash before enabling hash verification."
+            })
         return attrs
 
     def create(self, validated_data):
-        from .security import generate_api_key
+        from .security import generate_api_key, generate_redirect_hash
 
         allocations = validated_data.pop("client_allocations")
+        should_generate_hash = validated_data.pop("generate_redirect_hash", False)
         raw_key, prefix, last_four, key_hash = generate_api_key()
+        hash_values = {}
+        raw_redirect_hash = ""
+        if should_generate_hash:
+            raw_redirect_hash, hash_prefix, hash_last_four, redirect_hash_hash = generate_redirect_hash()
+            hash_values = {
+                "redirect_hash_prefix": hash_prefix,
+                "redirect_hash_last_four": hash_last_four,
+                "redirect_hash_hash": redirect_hash_hash,
+            }
         request = self.context.get("request")
         instance = VendorAPIKey.objects.create(
             **validated_data,
             prefix=prefix,
             last_four=last_four,
             key_hash=key_hash,
+            **hash_values,
             created_by=request.user if request else None,
         )
         instance.client_allocations.set(allocations)
         instance.api_key = raw_key
+        if raw_redirect_hash:
+            instance.redirect_hash_key = raw_redirect_hash
+        return instance
+
+    def update(self, instance, validated_data):
+        from .security import generate_redirect_hash
+
+        should_generate_hash = validated_data.pop("generate_redirect_hash", False)
+        instance = super().update(instance, validated_data)
+        if should_generate_hash:
+            raw_hash, prefix, last_four, key_hash = generate_redirect_hash()
+            instance.redirect_hash_prefix = prefix
+            instance.redirect_hash_last_four = last_four
+            instance.redirect_hash_hash = key_hash
+            instance.save(update_fields=[
+                "redirect_hash_prefix", "redirect_hash_last_four", "redirect_hash_hash", "updated_at",
+            ])
+            instance.redirect_hash_key = raw_hash
         return instance
 
 
@@ -774,7 +819,6 @@ class VendorClientAllocationSerializer(serializers.ModelSerializer):
     vendor_name = serializers.SerializerMethodField()
     client_name = serializers.CharField(source="client.name", read_only=True)
     account_type = serializers.CharField(source="vendor.employee_profile.account_type", read_only=True)
-    remaining_quantity = serializers.IntegerField(read_only=True)
     effective_cpi_cut_percent = serializers.DecimalField(max_digits=5, decimal_places=2, read_only=True)
     created_by = serializers.CharField(source="created_by.username", read_only=True, allow_null=True)
     api_key_scopes = serializers.SerializerMethodField()
@@ -782,13 +826,12 @@ class VendorClientAllocationSerializer(serializers.ModelSerializer):
     class Meta:
         model = VendorClientAllocation
         fields = [
-            "id", "vendor", "vendor_name", "account_type", "client", "client_name", "quantity_limit",
-            "reserved_quantity", "consumed_quantity", "remaining_quantity", "cpi_cut_override_percent",
+            "id", "vendor", "vendor_name", "account_type", "client", "client_name", "cpi_cut_override_percent",
             "effective_cpi_cut_percent", "min_cpi", "max_cpi", "api_key_scopes", "starts_at", "ends_at",
             "is_active", "created_by",
             "created_at", "updated_at",
         ]
-        read_only_fields = ["reserved_quantity", "consumed_quantity", "created_at", "updated_at"]
+        read_only_fields = ["created_at", "updated_at"]
 
     def get_vendor_name(self, obj) -> str:
         return obj.vendor.get_full_name() or obj.vendor.username
@@ -807,7 +850,6 @@ class VendorClientAllocationSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
         attrs = super().validate(attrs)
         vendor = attrs.get("vendor", getattr(self.instance, "vendor", None))
-        quantity_limit = attrs.get("quantity_limit", getattr(self.instance, "quantity_limit", 0))
         cut = attrs.get("cpi_cut_override_percent", getattr(self.instance, "cpi_cut_override_percent", None))
         profile = EmployeeProfile.objects.filter(user=vendor).first()
         if not profile or profile.account_type != EmployeeProfile.AccountType.EXTERNAL_VENDOR:
@@ -819,9 +861,6 @@ class VendorClientAllocationSerializer(serializers.ModelSerializer):
         if min_cpi is not None and max_cpi is not None and min_cpi > max_cpi:
             raise serializers.ValidationError({"max_cpi": "Maximum CPI must be greater than or equal to minimum CPI."})
         instance = self.instance
-        used = (instance.consumed_quantity + instance.reserved_quantity) if instance else 0
-        if quantity_limit < used:
-            raise serializers.ValidationError({"quantity_limit": "Limit cannot be below consumed plus reserved quantity."})
         starts_at = attrs.get("starts_at", getattr(instance, "starts_at", None))
         ends_at = attrs.get("ends_at", getattr(instance, "ends_at", None))
         if starts_at and ends_at and ends_at <= starts_at:
@@ -837,7 +876,6 @@ class VendorSurveyAllocationSerializer(serializers.ModelSerializer):
     survey_local_id = serializers.CharField(source="survey.local_id", read_only=True)
     survey_source_id = serializers.SerializerMethodField()
     survey_name = serializers.CharField(source="survey.name", read_only=True)
-    remaining_quantity = serializers.IntegerField(read_only=True)
     effective_cpi_cut_percent = serializers.DecimalField(max_digits=5, decimal_places=2, read_only=True)
     created_by = serializers.CharField(source="created_by.username", read_only=True, allow_null=True)
 
@@ -845,12 +883,11 @@ class VendorSurveyAllocationSerializer(serializers.ModelSerializer):
         model = VendorSurveyAllocation
         fields = [
             "id", "client_allocation", "vendor", "vendor_name", "client", "client_name", "survey",
-            "survey_local_id", "survey_source_id", "survey_name", "quantity_limit", "reserved_quantity",
-            "consumed_quantity", "remaining_quantity", "cpi_cut_override_percent",
+            "survey_local_id", "survey_source_id", "survey_name", "cpi_cut_override_percent",
             "effective_cpi_cut_percent", "starts_at", "ends_at", "is_active", "created_by",
             "created_at", "updated_at",
         ]
-        read_only_fields = ["reserved_quantity", "consumed_quantity", "created_at", "updated_at"]
+        read_only_fields = ["created_at", "updated_at"]
 
     def get_vendor_name(self, obj) -> str:
         return obj.vendor.get_full_name() or obj.vendor.username
@@ -863,7 +900,6 @@ class VendorSurveyAllocationSerializer(serializers.ModelSerializer):
         attrs = super().validate(attrs)
         parent = attrs.get("client_allocation", getattr(self.instance, "client_allocation", None))
         survey = attrs.get("survey", getattr(self.instance, "survey", None))
-        quantity_limit = attrs.get("quantity_limit", getattr(self.instance, "quantity_limit", 0))
         cut = attrs.get("cpi_cut_override_percent", getattr(self.instance, "cpi_cut_override_percent", None))
         if parent and survey and survey.client_id != parent.client_id:
             raise serializers.ValidationError({"survey": "Survey must belong to the parent allocation's client."})
@@ -871,9 +907,6 @@ class VendorSurveyAllocationSerializer(serializers.ModelSerializer):
         if account_type == EmployeeProfile.AccountType.INTERNAL_VENDOR and cut not in {None, Decimal("0.00")}:
             raise serializers.ValidationError({"cpi_cut_override_percent": "Internal supplier cut must be zero."})
         instance = self.instance
-        used = (instance.consumed_quantity + instance.reserved_quantity) if instance else 0
-        if quantity_limit < used:
-            raise serializers.ValidationError({"quantity_limit": "Limit cannot be below consumed plus reserved quantity."})
         starts_at = attrs.get("starts_at", getattr(instance, "starts_at", None))
         ends_at = attrs.get("ends_at", getattr(instance, "ends_at", None))
         if starts_at and ends_at and ends_at <= starts_at:
@@ -890,6 +923,6 @@ class AllocationReservationSerializer(serializers.ModelSerializer):
         model = AllocationReservation
         fields = [
             "id", "attempt", "rid", "vendor", "client_allocation", "survey_allocation", "survey",
-            "quantity", "status", "expires_at", "finalized_at", "reason", "created_at", "updated_at",
+            "status", "expires_at", "finalized_at", "reason", "created_at", "updated_at",
         ]
         read_only_fields = fields

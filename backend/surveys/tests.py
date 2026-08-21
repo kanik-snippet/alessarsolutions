@@ -430,6 +430,11 @@ class SurveyAPITests(TestCase):
         self.assertEqual(response.data["results"][0]["buyer_id"], "3690")
         self.assertEqual(response.data["results"][0]["survey_type"], "B2C")
 
+        group_only = Survey.objects.create(source_id=9881, group_type="Business", survey_type="")
+        business = self.api.get(reverse("survey-list"), {"survey_type": "B2B"})
+        self.assertEqual(business.status_code, 200)
+        self.assertIn(group_only.local_id, [row["local_id"] for row in business.data["results"]])
+
     def test_cpi_range_and_sort_are_applied_server_side(self):
         UserFunctionOverride.objects.create(
             user=self.user,

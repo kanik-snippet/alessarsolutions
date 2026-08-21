@@ -8,6 +8,7 @@ from rest_framework import serializers
 
 from accounts.access import has_function_access
 from vendors.access import vendor_scope_user_id
+from vendors.models import VendorAPIKey
 from vendors.services import organization_client_ids_for_user, survey_pricing_for_user
 
 from .models import (
@@ -333,6 +334,10 @@ class SurveyListSerializer(serializers.ModelSerializer):
 
     @extend_schema_field({"oneOf": [{"type": "integer"}, {"type": "string"}]})
     def get_source_id(self, obj):
+        request = self.context.get("request")
+        api_key = getattr(request, "auth", None) if request else None
+        if isinstance(api_key, VendorAPIKey) and api_key.survey_id_mode == VendorAPIKey.SurveyIDMode.PROJECT_ID:
+            return obj.local_id
         return obj.source_identifier
 
     def get_provider_code(self, obj) -> str:
@@ -409,15 +414,33 @@ class SurveyListSerializer(serializers.ModelSerializer):
         )
         if not obj.entry_link and not supports_lazy_entry_link:
             return None
-        query = urlencode({
-            "surveyId": obj.source_identifier,
+        api_key = getattr(request, "auth", None)
+        is_supplier_api = isinstance(api_key, VendorAPIKey)
+        exposed_survey_id = (
+            obj.local_id
+            if is_supplier_api and api_key.survey_id_mode == VendorAPIKey.SurveyIDMode.PROJECT_ID
+            else obj.source_identifier
+        )
+        query_values = {
+            "surveyId": exposed_survey_id,
             # Public platform links never expose a client's real upstream supplier code.
             "supplierCode": settings.PUBLIC_SUPPLIER_CODE,
             "userId": request.user.pk,
             "code": obj.local_id,
-        })
+        }
+        if is_supplier_api:
+            query_values.update({
+                "keyId": api_key.prefix,
+                "supplierUid": "{supplier_uid}",
+            })
+            if api_key.redirect_hash_required:
+                query_values["hash"] = "{hash_key}"
+        query = urlencode(query_values, safe="{}")
         path = f"{reverse('survey-start')}?{query}"
-        return request.build_absolute_uri(path) if request else path
+        rendered = request.build_absolute_uri(path) if request else path
+        # Django safely URI-encodes template braces while building an absolute
+        # URI. Restore only our two documented placeholders for copy/paste use.
+        return rendered.replace("%7B", "{").replace("%7D", "}")
 
 
 class SurveyDetailSerializer(SurveyListSerializer):

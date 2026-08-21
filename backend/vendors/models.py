@@ -477,6 +477,10 @@ class VendorCommercialProfile(models.Model):
 class VendorAPIKey(models.Model):
     """Revocable, hashed API credential for one external supplier account."""
 
+    class SurveyIDMode(models.TextChoices):
+        PROJECT_ID = "project_id", "Project ID"
+        SOURCE_ID = "source_id", "Upstream survey ID"
+
     vendor = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,
@@ -489,9 +493,26 @@ class VendorAPIKey(models.Model):
         help_text="Client grants this key may expose. Project visibility and caps still follow the live allocation rules.",
     )
     name = models.CharField(max_length=120)
-    prefix = models.CharField(max_length=16, db_index=True)
+    prefix = models.CharField(max_length=16, unique=True)
     last_four = models.CharField(max_length=4)
     key_hash = models.CharField(max_length=64, unique=True, editable=False)
+    survey_id_mode = models.CharField(
+        max_length=20,
+        choices=SurveyIDMode.choices,
+        default=SurveyIDMode.PROJECT_ID,
+        help_text="Identifier exposed as survey_id/source_id in this key's survey feed.",
+    )
+    redirect_hash_required = models.BooleanField(
+        default=False,
+        help_text="Require the supplier's separately generated hash key on respondent entry links.",
+    )
+    redirect_hash_hash = models.CharField(max_length=64, blank=True, editable=False)
+    redirect_hash_prefix = models.CharField(max_length=16, blank=True, editable=False)
+    redirect_hash_last_four = models.CharField(max_length=4, blank=True, editable=False)
+    completed_redirect_url = models.URLField(max_length=2000, blank=True)
+    terminated_redirect_url = models.URLField(max_length=2000, blank=True)
+    quota_full_redirect_url = models.URLField(max_length=2000, blank=True)
+    quality_redirect_url = models.URLField(max_length=2000, blank=True)
     is_active = models.BooleanField(default=True, db_index=True)
     expires_at = models.DateTimeField(null=True, blank=True, db_index=True)
     last_used_at = models.DateTimeField(null=True, blank=True)
@@ -517,6 +538,20 @@ class VendorAPIKey(models.Model):
     def masked_key(self):
         return f"{self.prefix}••••{self.last_four}"
 
+    @property
+    def masked_redirect_hash(self):
+        if not self.redirect_hash_hash:
+            return ""
+        return f"{self.redirect_hash_prefix}••••{self.redirect_hash_last_four}"
+
+    def redirect_url_for_status(self, status_code):
+        return {
+            "1": self.completed_redirect_url,
+            "2": self.terminated_redirect_url,
+            "3": self.quota_full_redirect_url,
+            "4": self.quality_redirect_url,
+        }.get(str(status_code), "")
+
     def clean(self):
         super().clean()
         account_type = getattr(getattr(self.vendor, "employee_profile", None), "account_type", "")
@@ -528,7 +563,7 @@ class VendorAPIKey(models.Model):
 
 
 class VendorClientAllocation(models.Model):
-    """Client eligibility, shared complete ceiling and client-level CPI policy."""
+    """Client eligibility and client-level CPI policy."""
 
     vendor = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -536,9 +571,6 @@ class VendorClientAllocation(models.Model):
         related_name="client_allocations",
     )
     client = models.ForeignKey(Client, on_delete=models.PROTECT, related_name="vendor_allocations")
-    quantity_limit = models.PositiveBigIntegerField(default=0)
-    reserved_quantity = models.PositiveBigIntegerField(default=0, editable=False)
-    consumed_quantity = models.PositiveBigIntegerField(default=0, editable=False)
     cpi_cut_override_percent = models.DecimalField(
         max_digits=5,
         decimal_places=2,
@@ -581,23 +613,11 @@ class VendorClientAllocation(models.Model):
         constraints = [
             models.UniqueConstraint(fields=["vendor", "client"], name="unique_vendor_client_allocation"),
             models.CheckConstraint(
-                condition=Q(consumed_quantity__lte=F("quantity_limit")),
-                name="client_consumed_not_above_limit",
-            ),
-            models.CheckConstraint(
-                condition=Q(reserved_quantity__lte=F("quantity_limit") - F("consumed_quantity")),
-                name="client_reserved_within_remaining",
-            ),
-            models.CheckConstraint(
                 condition=Q(min_cpi__isnull=True) | Q(max_cpi__isnull=True) | Q(min_cpi__lte=F("max_cpi")),
                 name="vendor_client_cpi_range_valid",
             ),
         ]
         indexes = [models.Index(fields=["vendor", "is_active"]), models.Index(fields=["client", "is_active"])]
-
-    @property
-    def remaining_quantity(self):
-        return max(0, self.quantity_limit - self.consumed_quantity - self.reserved_quantity)
 
     @property
     def effective_cpi_cut_percent(self):
@@ -618,15 +638,13 @@ class VendorClientAllocation(models.Model):
             raise ValidationError({"max_cpi": "Maximum CPI must be greater than or equal to minimum CPI."})
         if self.ends_at and self.starts_at and self.ends_at <= self.starts_at:
             raise ValidationError({"ends_at": "End time must be after start time."})
-        if self.consumed_quantity + self.reserved_quantity > self.quantity_limit:
-            raise ValidationError({"quantity_limit": "Limit cannot be below consumed plus reserved quantity."})
 
     def __str__(self):
         return f"{self.vendor} · {self.client}"
 
 
 class VendorSurveyAllocation(models.Model):
-    """Explicit project visibility and complete cap under a client allocation."""
+    """Optional project exclusion/CPI override under a client allocation."""
 
     client_allocation = models.ForeignKey(
         VendorClientAllocation,
@@ -634,9 +652,6 @@ class VendorSurveyAllocation(models.Model):
         related_name="survey_allocations",
     )
     survey = models.ForeignKey("surveys.Survey", on_delete=models.PROTECT, related_name="vendor_allocations")
-    quantity_limit = models.PositiveBigIntegerField(default=0)
-    reserved_quantity = models.PositiveBigIntegerField(default=0, editable=False)
-    consumed_quantity = models.PositiveBigIntegerField(default=0, editable=False)
     cpi_cut_override_percent = models.DecimalField(
         max_digits=5,
         decimal_places=2,
@@ -665,14 +680,6 @@ class VendorSurveyAllocation(models.Model):
                 fields=["client_allocation", "survey"],
                 name="unique_vendor_survey_allocation",
             ),
-            models.CheckConstraint(
-                condition=Q(consumed_quantity__lte=F("quantity_limit")),
-                name="survey_consumed_not_above_limit",
-            ),
-            models.CheckConstraint(
-                condition=Q(reserved_quantity__lte=F("quantity_limit") - F("consumed_quantity")),
-                name="survey_reserved_within_remaining",
-            ),
         ]
         indexes = [
             models.Index(fields=["survey", "is_active"]),
@@ -686,10 +693,6 @@ class VendorSurveyAllocation(models.Model):
     @property
     def client(self):
         return self.client_allocation.client
-
-    @property
-    def remaining_quantity(self):
-        return max(0, self.quantity_limit - self.consumed_quantity - self.reserved_quantity)
 
     @property
     def effective_cpi_cut_percent(self):
@@ -708,15 +711,13 @@ class VendorSurveyAllocation(models.Model):
             raise ValidationError({"cpi_cut_override_percent": "Internal suppliers cannot have a CPI cut."})
         if self.ends_at and self.starts_at and self.ends_at <= self.starts_at:
             raise ValidationError({"ends_at": "End time must be after start time."})
-        if self.consumed_quantity + self.reserved_quantity > self.quantity_limit:
-            raise ValidationError({"quantity_limit": "Limit cannot be below consumed plus reserved quantity."})
 
     def __str__(self):
         return f"{self.vendor} · {self.survey}"
 
 
 class AllocationReservation(models.Model):
-    """Auditable one-unit reservation lifecycle for a survey attempt."""
+    """Auditable allocation lifecycle for a survey attempt."""
 
     class Status(models.TextChoices):
         RESERVED = "reserved", "Reserved"
@@ -741,7 +742,6 @@ class AllocationReservation(models.Model):
         on_delete=models.PROTECT,
         related_name="reservations",
     )
-    quantity = models.PositiveSmallIntegerField(default=1)
     status = models.CharField(max_length=12, choices=Status.choices, default=Status.RESERVED, db_index=True)
     expires_at = models.DateTimeField(db_index=True)
     finalized_at = models.DateTimeField(null=True, blank=True)

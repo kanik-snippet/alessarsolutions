@@ -83,12 +83,18 @@ def project_filter_metadata(
             .distinct()
             .order_by("buyer_id")
         )
-        survey_types = list(
-            queryset.exclude(survey_type="")
-            .values_list("survey_type", flat=True)
-            .distinct()
-            .order_by("survey_type")
-        )
+        raw_survey_types = queryset.values_list("survey_type", "group_type").distinct()
+        survey_types = set()
+        for survey_type, group_type in raw_survey_types:
+            raw_value = str(survey_type or group_type or "").strip()
+            normalized = raw_value.casefold()
+            if normalized in {"b2b", "business", "business-to-business", "business to business"}:
+                survey_types.add("B2B")
+            elif normalized in {"b2c", "consumer", "business-to-consumer", "business to consumer"}:
+                survey_types.add("B2C")
+            elif raw_value:
+                survey_types.add(raw_value)
+        survey_types = sorted(survey_types)
         cpi_bounds = (
             queryset.aggregate(
                 minimum=Min(cpi_field),

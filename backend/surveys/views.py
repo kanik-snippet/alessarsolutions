@@ -6,6 +6,7 @@ of those services inside one guarded request lifecycle.
 """
 
 import csv
+import hmac
 import ipaddress
 import json
 import logging
@@ -13,7 +14,7 @@ import re
 from datetime import date, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
-from urllib.parse import quote, urlencode
+from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
@@ -55,6 +56,8 @@ from vendors.services import (
     visible_cpi_for_user,
 )
 from vendors.access import is_external_vendor_scope, vendor_scope_user_id
+from vendors.models import VendorAPIKey
+from vendors.security import digest_api_key
 
 from .filters import SurveyAttemptFilter, SurveyFilter
 from .dashboard import (
@@ -1540,6 +1543,50 @@ def survey_start(request):
         required_params = {"surveyId", "supplierCode", "userId", "code"}
         if has_pid_parameter:
             required_params.add("pid")
+        key_prefix = request.GET.get("keyId", "").strip()
+        external_api_key = None
+        supplier_respondent_id = ""
+        if key_prefix:
+            external_api_key = VendorAPIKey.objects.select_related(
+                "vendor", "vendor__employee_profile", "vendor__vendor_commercial_profile"
+            ).filter(prefix=key_prefix).first()
+            now = timezone.now()
+            commercial_profile = (
+                getattr(external_api_key.vendor, "vendor_commercial_profile", None)
+                if external_api_key else None
+            )
+            if (
+                external_api_key is None
+                or not external_api_key.is_active
+                or external_api_key.revoked_at
+                or (external_api_key.expires_at and external_api_key.expires_at <= now)
+                or not external_api_key.vendor.is_active
+                or not commercial_profile
+                or not commercial_profile.is_active
+                or not commercial_profile.api_access_enabled
+            ):
+                return _invalid_survey_link(request)
+            required_params.update({"keyId", "supplierUid"})
+            supplier_respondent_id = request.GET.get("supplierUid", "").strip()
+            if (
+                not supplier_respondent_id
+                or len(supplier_respondent_id) > 160
+                or "{" in supplier_respondent_id
+                or "}" in supplier_respondent_id
+            ):
+                return _invalid_survey_link(request)
+            if external_api_key.redirect_hash_required:
+                required_params.add("hash")
+                supplied_hash = request.GET.get("hash", "").strip()
+                if not supplied_hash or not hmac.compare_digest(
+                    external_api_key.redirect_hash_hash,
+                    digest_api_key(supplied_hash),
+                ):
+                    return _invalid_survey_link(
+                        request,
+                        "This supplier hash is invalid.",
+                        status_code=400,
+                    )
         if not _has_exact_query(request, required_params):
             return _invalid_survey_link(request)
 
@@ -1568,12 +1615,22 @@ def survey_start(request):
             or not has_function_access(platform_user, "survey_links.copy")
         ):
             return _invalid_survey_link(request)
+        if external_api_key and platform_user.pk != external_api_key.vendor_id:
+            return _invalid_survey_link(request)
 
-        survey = scope_surveys_for_user(
+        survey_queryset = scope_surveys_for_user(
             Survey.objects.select_related("integration", "client"), platform_user
-        ).filter(
-            source_key=survey_id, local_id=internal_code, status=Survey.Status.LIVE
-        ).first()
+        )
+        if external_api_key:
+            survey_queryset = scope_surveys_for_api_key(survey_queryset, external_api_key)
+        survey_lookup = {"local_id": internal_code, "status": Survey.Status.LIVE}
+        if external_api_key and external_api_key.survey_id_mode == VendorAPIKey.SurveyIDMode.PROJECT_ID:
+            survey_lookup["local_id"] = survey_id
+            if survey_id != internal_code:
+                return _invalid_survey_link(request)
+        else:
+            survey_lookup["source_key"] = survey_id
+        survey = survey_queryset.filter(**survey_lookup).first()
         if survey is None:
             return _invalid_survey_link(request)
         provider_code = (
@@ -1671,6 +1728,8 @@ def survey_start(request):
                     get_request_ip(request),
                     client_data=entry_client_data,
                     pid=platform_pid or None,
+                    vendor_api_key=external_api_key,
+                    supplier_respondent_id=supplier_respondent_id,
                 )
                 if allocation_context:
                     reserve_attempt_capacity(
@@ -1848,6 +1907,41 @@ STATUS_PAGES = {
 }
 
 
+def _external_supplier_outcome_url(attempt, status_code):
+    """Build the configured supplier return URL with normalized outcome data."""
+
+    api_key = getattr(attempt, "vendor_api_key", None)
+    if not api_key or not attempt.supplier_respondent_id:
+        return ""
+    base_url = api_key.redirect_url_for_status(status_code)
+    if not base_url:
+        return ""
+    outcome = provider_outcome(attempt)
+    survey_identifier = (
+        attempt.survey.local_id
+        if api_key.survey_id_mode == VendorAPIKey.SurveyIDMode.PROJECT_ID
+        else attempt.survey.source_identifier
+    )
+    values = {
+        "status": str(status_code),
+        "supplier_uid": attempt.supplier_respondent_id,
+        "project_id": attempt.survey.local_id,
+        "survey_id": survey_identifier,
+        "rid": attempt.rid,
+        "term_reason": outcome.get("reason", ""),
+        "term_category": outcome.get("category", ""),
+    }
+    rendered_url = str(base_url)
+    for name, value in values.items():
+        safe_value = quote(str(value), safe="")
+        rendered_url = rendered_url.replace(f"{{{name}}}", safe_value)
+        rendered_url = rendered_url.replace(f"%%{name}%%", safe_value)
+    parts = urlsplit(rendered_url)
+    query = dict(parse_qsl(parts.query, keep_blank_values=True))
+    query.update({name: str(value) for name, value in values.items()})
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
+
+
 RFG_CALLBACK_IPS = {
     "15.222.163.99", "3.97.223.177", "3.97.28.227", "3.230.105.121",
     "52.21.20.32", "52.45.41.61",
@@ -1930,6 +2024,10 @@ def rfg_result(request):
         callback_parameters if attempt.is_verified else local_parameters or browser_parameters
     )
     outcome = describe_rfg_outcome(outcome_parameters, attempt=attempt)
+    if attempt.status in STATUS_PAGES:
+        supplier_url = _external_supplier_outcome_url(attempt, attempt.status)
+        if supplier_url:
+            return HttpResponseRedirect(supplier_url)
     return render(request, "surveys/rfg_result.html", {
         "attempt": attempt,
         "outcome": outcome,
@@ -2083,6 +2181,9 @@ def biobrain_survey_return(request, status_code):
         source="biobrain_browser_callback",
     )
     recorded_status = attempt.status if attempt.status in STATUS_PAGES else status_code
+    supplier_url = _external_supplier_outcome_url(attempt, recorded_status)
+    if supplier_url:
+        return HttpResponseRedirect(supplier_url)
     result_base_url = settings.PUBLIC_RESULT_BASE_URL or settings.PUBLIC_APP_BASE_URL
     if not result_base_url:
         result_base_url = request.build_absolute_uri("/").rstrip("/")
@@ -2192,7 +2293,7 @@ def survey_status(request):
             "message": "A valid status (1–4) and tracking ID are required.",
         }, status=400)
 
-    attempts = SurveyAttempt.objects.select_related("survey__integration")
+    attempts = SurveyAttempt.objects.select_related("survey__integration", "vendor_api_key")
     if enligne_identifier:
         attempt = attempts.filter(
             rid=callback_identifier,
@@ -2277,6 +2378,9 @@ def survey_status(request):
             finalize_attempt_capacity(attempt)
         status_label = attempt.get_status_display()
         if not canonical_query:
+            supplier_url = _external_supplier_outcome_url(attempt, status_code)
+            if supplier_url:
+                return HttpResponseRedirect(supplier_url)
             clean_query = urlencode({"status": status_code, "pid": attempt.pid})
             return HttpResponseRedirect(f"{reverse('survey-status')}?{clean_query}")
     else:

@@ -68,11 +68,11 @@ def vendor_management_page(request):
         if f"vendors.column.vendor.{name}" in codes
     ]
     client_columns = [
-        name for name in ("vendor", "client", "quantity", "cpi", "window", "actions")
+        name for name in ("vendor", "client", "cpi", "window", "actions")
         if f"vendors.column.client.{name}" in codes
     ]
     project_columns = [
-        name for name in ("vendor", "survey", "client", "quantity", "cpi", "actions")
+        name for name in ("vendor", "survey", "client", "cpi", "actions")
         if f"vendors.column.project.{name}" in codes
     ]
     api_columns = [
@@ -86,7 +86,7 @@ def vendor_management_page(request):
     return render(request, "vendors/management.html", {
         "active_page": "vendors",
         "vendor_cards": [
-            name for name in ("vendors", "client_grants", "quantity", "projects")
+            name for name in ("vendors", "client_grants", "projects")
             if f"vendors.card.{name}" in codes
         ],
         "can_view_vendors": "vendors.tab.policies" in codes,
@@ -669,8 +669,8 @@ class VendorAPIKeyViewSet(viewsets.ModelViewSet):
 
 
 @extend_schema_view(
-    list=extend_schema(tags=["Suppliers & allocations"], summary="List supplier client grants and quantities"),
-    create=extend_schema(tags=["Suppliers & allocations"], summary="Allocate a client and quantity to a supplier"),
+    list=extend_schema(tags=["Suppliers & allocations"], summary="List supplier client grants"),
+    create=extend_schema(tags=["Suppliers & allocations"], summary="Allocate a client to a supplier"),
     retrieve=extend_schema(tags=["Suppliers & allocations"], summary="Get a supplier client allocation"),
     update=extend_schema(tags=["Suppliers & allocations"], summary="Replace a supplier client allocation"),
     partial_update=extend_schema(tags=["Suppliers & allocations"], summary="Update a supplier client allocation"),
@@ -689,17 +689,17 @@ class VendorClientAllocationViewSet(PermissionByActionMixin, viewsets.ModelViewS
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ["vendor", "client", "vendor__employee_profile__account_type", "is_active"]
     search_fields = ["vendor__username", "vendor__first_name", "vendor__last_name", "client__name", "client__code"]
-    ordering_fields = ["created_at", "updated_at", "quantity_limit", "consumed_quantity"]
+    ordering_fields = ["created_at", "updated_at", "client__name"]
     ordering = ["client__name", "vendor__username"]
     vendor_scope_filter = "vendor_id"
 
 
 @extend_schema_view(
-    list=extend_schema(tags=["Suppliers & allocations"], summary="List supplier project allocations and complete caps"),
-    create=extend_schema(tags=["Vendors & allocations"], summary="Allocate a visible project with a complete cap"),
+    list=extend_schema(tags=["Suppliers & allocations"], summary="List supplier project exclusions and overrides"),
+    create=extend_schema(tags=["Vendors & allocations"], summary="Exclude or override one inherited project"),
     retrieve=extend_schema(tags=["Vendors & allocations"], summary="Get a project allocation"),
     update=extend_schema(tags=["Vendors & allocations"], summary="Replace a project allocation"),
-    partial_update=extend_schema(tags=["Vendors & allocations"], summary="Update a project allocation or cap"),
+    partial_update=extend_schema(tags=["Vendors & allocations"], summary="Update a project exclusion or override"),
     destroy=extend_schema(tags=["Vendors & allocations"], summary="Deactivate a project allocation"),
 )
 class VendorSurveyAllocationViewSet(PermissionByActionMixin, viewsets.ModelViewSet):
@@ -719,7 +719,7 @@ class VendorSurveyAllocationViewSet(PermissionByActionMixin, viewsets.ModelViewS
         "client_allocation__vendor__username", "client_allocation__vendor__first_name",
         "client_allocation__vendor__last_name", "survey__local_id", "survey__source_id", "survey__name",
     ]
-    ordering_fields = ["created_at", "updated_at", "quantity_limit", "consumed_quantity"]
+    ordering_fields = ["created_at", "updated_at", "survey__source_id"]
     ordering = ["survey__source_id", "client_allocation__vendor__username"]
     vendor_scope_filter = "client_allocation__vendor_id"
 

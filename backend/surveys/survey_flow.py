@@ -197,6 +197,8 @@ def create_attempt(
     ip_address: str | None,
     client_data: dict | None = None,
     pid: str | None = None,
+    vendor_api_key=None,
+    supplier_respondent_id: str = "",
 ) -> SurveyAttempt:
     """Create one immutable respondent journey with fresh RID/PID/UID and CPI audit.
 
@@ -223,6 +225,8 @@ def create_attempt(
                     prescreener_uid=generate_prescreener_uid(),
                     survey=survey,
                     platform_user=platform_user,
+                    vendor_api_key=vendor_api_key,
+                    supplier_respondent_id=str(supplier_respondent_id or "").strip(),
                     user_id=str(platform_user.pk),
                     supplier_code=supplier_code_from_entry_link(survey.entry_link),
                     source_cpi_snapshot=survey.cpi,

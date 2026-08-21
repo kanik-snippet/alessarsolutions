@@ -18,7 +18,6 @@ from surveys.project_cache import invalidate_project_cache
 from vendors.models import (
     AllocationReservation,
     ClientIntegration,
-    VendorClientAllocation,
     VendorSurveyAllocation,
 )
 
@@ -183,18 +182,6 @@ class Command(BaseCommand):
         attempts = self._attempts(current_surveys)
         survey_ids = list(current_surveys.values_list("pk", flat=True))
         attempt_ids = list(attempts.values_list("pk", flat=True))
-        client_ids = set(
-            integrations.values_list("client_id", flat=True)
-        )
-        client_ids.update(
-            current_surveys.exclude(client_id__isnull=True)
-            .values_list("client_id", flat=True)
-        )
-        client_ids.update(
-            attempts.exclude(client_id__isnull=True)
-            .values_list("client_id", flat=True)
-        )
-
         for batch in _chunks(attempt_ids):
             with transaction.atomic():
                 AllocationReservation.objects.filter(attempt_id__in=batch).delete()
@@ -209,10 +196,6 @@ class Command(BaseCommand):
                 CintWebhookDelivery.objects.filter(integration_id__in=batch).delete()
 
         with transaction.atomic():
-            VendorClientAllocation.objects.filter(client_id__in=client_ids).update(
-                consumed_quantity=0,
-                reserved_quantity=0,
-            )
             SyncLease.objects.filter(
                 Q(name__in=[f"integration-{pk}-sync" for pk in integration_ids])
                 | Q(name__in=[f"cint-redirects-{pk}" for pk in integration_ids])

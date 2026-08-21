@@ -1979,7 +1979,7 @@ paths:
   /api/v1/vendors/client-allocations/:
     get:
       operationId: api_v1_vendors_client_allocations_list
-      summary: List supplier client grants and quantities
+      summary: List supplier client grants
       parameters:
       - in: query
         name: client
@@ -2043,7 +2043,7 @@ paths:
           description: ''
     post:
       operationId: api_v1_vendors_client_allocations_create
-      summary: Allocate a client and quantity to a supplier
+      summary: Allocate a client to a supplier
       tags:
       - Suppliers & allocations
       requestBody:
@@ -3477,7 +3477,7 @@ paths:
   /api/v1/vendors/survey-allocations/:
     get:
       operationId: api_v1_vendors_survey_allocations_list
-      summary: List supplier project allocations and complete caps
+      summary: List supplier project exclusions and overrides
       parameters:
       - in: query
         name: client_allocation
@@ -3537,7 +3537,7 @@ paths:
           description: ''
     post:
       operationId: api_v1_vendors_survey_allocations_create
-      summary: Allocate a visible project with a complete cap
+      summary: Exclude or override one inherited project
       tags:
       - Vendors & allocations
       requestBody:
@@ -3621,7 +3621,7 @@ paths:
           description: ''
     patch:
       operationId: api_v1_vendors_survey_allocations_partial_update
-      summary: Update a project allocation or cap
+      summary: Update a project exclusion or override
       parameters:
       - in: path
         name: id
@@ -7658,9 +7658,6 @@ components:
           type: integer
           readOnly: true
           nullable: true
-        quantity:
-          type: integer
-          readOnly: true
         status:
           allOf:
           - $ref: '#/components/schemas/AllocationReservationStatusEnum'
@@ -7692,7 +7689,6 @@ components:
       - expires_at
       - finalized_at
       - id
-      - quantity
       - reason
       - rid
       - status
@@ -9671,10 +9667,42 @@ components:
           type: string
           minLength: 1
           maxLength: 120
+        survey_id_mode:
+          allOf:
+          - $ref: '#/components/schemas/SurveyIdModeEnum'
+          description: |-
+            Identifier exposed as survey_id/source_id in this key's survey feed.
+
+            * `project_id` - Project ID
+            * `source_id` - Upstream survey ID
         client_allocations:
           type: array
           items:
             type: integer
+        redirect_hash_required:
+          type: boolean
+          description: Require the supplier's separately generated hash key on respondent
+            entry links.
+        generate_redirect_hash:
+          type: boolean
+          writeOnly: true
+          default: false
+        completed_redirect_url:
+          type: string
+          format: uri
+          maxLength: 2000
+        terminated_redirect_url:
+          type: string
+          format: uri
+          maxLength: 2000
+        quota_full_redirect_url:
+          type: string
+          format: uri
+          maxLength: 2000
+        quality_redirect_url:
+          type: string
+          format: uri
+          maxLength: 2000
         expires_at:
           type: string
           format: date-time
@@ -9686,11 +9714,6 @@ components:
           type: integer
         client:
           type: integer
-        quantity_limit:
-          type: integer
-          maximum: 9223372036854775807
-          minimum: 0
-          format: int64
         cpi_cut_override_percent:
           type: string
           format: decimal
@@ -9751,11 +9774,6 @@ components:
           type: integer
         survey:
           type: integer
-        quantity_limit:
-          type: integer
-          maximum: 9223372036854775807
-          minimum: 0
-          format: int64
         cpi_cut_override_percent:
           type: string
           format: decimal
@@ -10571,6 +10589,14 @@ components:
       - targeting_questions
       - updated_at
       - vendor_pricing
+    SurveyIdModeEnum:
+      enum:
+      - project_id
+      - source_id
+      type: string
+      description: |-
+        * `project_id` - Project ID
+        * `source_id` - Upstream survey ID
     SurveyList:
       type: object
       properties:
@@ -11494,6 +11520,14 @@ components:
         api_key:
           type: string
           readOnly: true
+        survey_id_mode:
+          allOf:
+          - $ref: '#/components/schemas/SurveyIdModeEnum'
+          description: |-
+            Identifier exposed as survey_id/source_id in this key's survey feed.
+
+            * `project_id` - Project ID
+            * `source_id` - Upstream survey ID
         client_allocations:
           type: array
           items:
@@ -11503,6 +11537,32 @@ components:
           items:
             type: string
           readOnly: true
+        redirect_hash_required:
+          type: boolean
+          description: Require the supplier's separately generated hash key on respondent
+            entry links.
+        masked_redirect_hash:
+          type: string
+          readOnly: true
+        redirect_hash_key:
+          type: string
+          readOnly: true
+        completed_redirect_url:
+          type: string
+          format: uri
+          maxLength: 2000
+        terminated_redirect_url:
+          type: string
+          format: uri
+          maxLength: 2000
+        quota_full_redirect_url:
+          type: string
+          format: uri
+          maxLength: 2000
+        quality_redirect_url:
+          type: string
+          format: uri
+          maxLength: 2000
         is_active:
           type: boolean
           readOnly: true
@@ -11544,8 +11604,10 @@ components:
       - last_four
       - last_used_at
       - masked_key
+      - masked_redirect_hash
       - name
       - prefix
+      - redirect_hash_key
       - revoked_at
       - updated_at
       - vendor
@@ -11559,10 +11621,42 @@ components:
           type: string
           minLength: 1
           maxLength: 120
+        survey_id_mode:
+          allOf:
+          - $ref: '#/components/schemas/SurveyIdModeEnum'
+          description: |-
+            Identifier exposed as survey_id/source_id in this key's survey feed.
+
+            * `project_id` - Project ID
+            * `source_id` - Upstream survey ID
         client_allocations:
           type: array
           items:
             type: integer
+        redirect_hash_required:
+          type: boolean
+          description: Require the supplier's separately generated hash key on respondent
+            entry links.
+        generate_redirect_hash:
+          type: boolean
+          writeOnly: true
+          default: false
+        completed_redirect_url:
+          type: string
+          format: uri
+          maxLength: 2000
+        terminated_redirect_url:
+          type: string
+          format: uri
+          maxLength: 2000
+        quota_full_redirect_url:
+          type: string
+          format: uri
+          maxLength: 2000
+        quality_redirect_url:
+          type: string
+          format: uri
+          maxLength: 2000
         expires_at:
           type: string
           format: date-time
@@ -11589,20 +11683,6 @@ components:
           type: integer
         client_name:
           type: string
-          readOnly: true
-        quantity_limit:
-          type: integer
-          maximum: 9223372036854775807
-          minimum: 0
-          format: int64
-        reserved_quantity:
-          type: integer
-          readOnly: true
-        consumed_quantity:
-          type: integer
-          readOnly: true
-        remaining_quantity:
-          type: integer
           readOnly: true
         cpi_cut_override_percent:
           type: string
@@ -11661,13 +11741,10 @@ components:
       - api_key_scopes
       - client
       - client_name
-      - consumed_quantity
       - created_at
       - created_by
       - effective_cpi_cut_percent
       - id
-      - remaining_quantity
-      - reserved_quantity
       - updated_at
       - vendor
       - vendor_name
@@ -11678,11 +11755,6 @@ components:
           type: integer
         client:
           type: integer
-        quantity_limit:
-          type: integer
-          maximum: 9223372036854775807
-          minimum: 0
-          format: int64
         cpi_cut_override_percent:
           type: string
           format: decimal
@@ -11961,20 +12033,6 @@ components:
         survey_name:
           type: string
           readOnly: true
-        quantity_limit:
-          type: integer
-          maximum: 9223372036854775807
-          minimum: 0
-          format: int64
-        reserved_quantity:
-          type: integer
-          readOnly: true
-        consumed_quantity:
-          type: integer
-          readOnly: true
-        remaining_quantity:
-          type: integer
-          readOnly: true
         cpi_cut_override_percent:
           type: string
           format: decimal
@@ -12013,13 +12071,10 @@ components:
       - client
       - client_allocation
       - client_name
-      - consumed_quantity
       - created_at
       - created_by
       - effective_cpi_cut_percent
       - id
-      - remaining_quantity
-      - reserved_quantity
       - survey
       - survey_local_id
       - survey_name
@@ -12034,11 +12089,6 @@ components:
           type: integer
         survey:
           type: integer
-        quantity_limit:
-          type: integer
-          maximum: 9223372036854775807
-          minimum: 0
-          format: int64
         cpi_cut_override_percent:
           type: string
           format: decimal

@@ -1,6 +1,7 @@
 from datetime import timedelta
 from decimal import Decimal
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
 
 from django.contrib.auth import get_user_model
 from django.conf import settings
@@ -74,13 +75,11 @@ class VendorFoundationTests(TestCase):
         self.external_client_allocation = VendorClientAllocation.objects.create(
             vendor=self.external,
             client=self.client_record,
-            quantity_limit=5,
             created_by=self.owner,
         )
         self.external_survey_allocation = VendorSurveyAllocation.objects.create(
             client_allocation=self.external_client_allocation,
             survey=self.survey,
-            quantity_limit=2,
             created_by=self.owner,
         )
 
@@ -163,7 +162,7 @@ class VendorFoundationTests(TestCase):
         self.assertEqual(visible_cpi, Decimal("2.55"))
         self.assertEqual(applied_cut, Decimal("40.00"))
 
-    def test_reservation_freezes_cpi_and_completion_consumes_both_limits(self):
+    def test_allocation_audit_freezes_cpi_and_finalizes_completion(self):
         attempt = self.attempt("Ua1Bb2Cc3D")
         reservation = reserve_attempt_capacity(attempt, self.external_survey_allocation)
         self.assertEqual(reservation.status, AllocationReservation.Status.RESERVED)
@@ -182,10 +181,6 @@ class VendorFoundationTests(TestCase):
         self.assertEqual(finalized.status, AllocationReservation.Status.CONSUMED)
         attempt.refresh_from_db()
         self.assertEqual(attempt.payable_cpi_snapshot, Decimal("7.00"))
-        self.external_client_allocation.refresh_from_db()
-        self.external_survey_allocation.refresh_from_db()
-        self.assertEqual(self.external_client_allocation.consumed_quantity, 1)
-        self.assertEqual(self.external_survey_allocation.consumed_quantity, 1)
         self.assertEqual(finalize_attempt_capacity(attempt).status, AllocationReservation.Status.CONSUMED)
 
         new_attempt = self.attempt("Ua9Mm8Nn7P")
@@ -196,21 +191,18 @@ class VendorFoundationTests(TestCase):
         self.assertEqual(new_attempt.source_cpi_snapshot, Decimal("6.00"))
         self.assertEqual(new_attempt.payable_cpi_snapshot, Decimal("4.20"))
 
-    def test_non_complete_releases_and_exhausted_survey_rejects(self):
+    def test_non_complete_releases_and_upstream_exhaustion_rejects(self):
         attempt = self.attempt("Ua4Ee5Ff6G")
         reserve_attempt_capacity(attempt, self.external_survey_allocation)
         attempt.status = SurveyAttempt.Status.TERMINATED
         attempt.save(update_fields=["status"])
         self.assertEqual(finalize_attempt_capacity(attempt).status, AllocationReservation.Status.RELEASED)
-        self.external_survey_allocation.refresh_from_db()
-        self.assertEqual(self.external_survey_allocation.remaining_quantity, 2)
-
-        self.external_survey_allocation.quantity_limit = 0
-        self.external_survey_allocation.save(update_fields=["quantity_limit"])
-        with self.assertRaisesMessage(AllocationUnavailable, "Project complete cap is exhausted"):
+        self.survey.remaining = 0
+        self.survey.save(update_fields=["remaining"])
+        with self.assertRaisesMessage(AllocationUnavailable, "Upstream survey quantity is exhausted"):
             reserve_attempt_capacity(self.attempt("Ua7Hh8Ii9J"), self.external_survey_allocation)
 
-    def test_client_grant_exposes_all_projects_and_uses_shared_capacity(self):
+    def test_client_grant_exposes_all_projects_without_local_quantity_cap(self):
         unallocated_survey = Survey.objects.create(
             client=self.client_record,
             source_id=88002,
@@ -262,8 +254,6 @@ class VendorFoundationTests(TestCase):
         created_attempt.status = SurveyAttempt.Status.COMPLETED
         created_attempt.save(update_fields=["status"])
         finalize_attempt_capacity(created_attempt)
-        self.external_client_allocation.refresh_from_db()
-        self.assertEqual(self.external_client_allocation.consumed_quantity, 1)
 
     def test_superuser_can_manage_foundation_api_and_employee_cannot(self):
         owner_api = APIClient()
@@ -291,7 +281,6 @@ class VendorFoundationTests(TestCase):
         sibling_allocation = VendorClientAllocation.objects.create(
             vendor=sibling,
             client=self.client_record,
-            quantity_limit=3,
             created_by=self.owner,
         )
         for code in ["clients.view", "vendors.view", "vendors.tab.clients"]:
@@ -313,7 +302,7 @@ class VendorFoundationTests(TestCase):
         self.assertEqual(
             api.patch(
                 reverse("vendor-client-allocation-detail", kwargs={"pk": self.external_client_allocation.pk}),
-                {"quantity_limit": 99},
+                {"cpi_cut_override_percent": "10.00"},
                 format="json",
             ).status_code,
             403,
@@ -331,12 +320,8 @@ class VendorFoundationTests(TestCase):
         AllocationReservation.objects.filter(pk=reservation.pk).update(expires_at=timezone.now() - timedelta(seconds=1))
         result = expire_allocation_reservations_task.run()
         reservation.refresh_from_db()
-        self.external_client_allocation.refresh_from_db()
-        self.external_survey_allocation.refresh_from_db()
         self.assertEqual(result["expired"], 1)
         self.assertEqual(reservation.status, AllocationReservation.Status.EXPIRED)
-        self.assertEqual(self.external_client_allocation.reserved_quantity, 0)
-        self.assertEqual(self.external_survey_allocation.reserved_quantity, 0)
 
     def test_inactive_project_override_hides_only_that_project(self):
         second = Survey.objects.create(
@@ -426,7 +411,6 @@ class VendorFoundationTests(TestCase):
         VendorClientAllocation.objects.create(
             vendor=self.external,
             client=second_client,
-            quantity_limit=10,
             cpi_cut_override_percent=Decimal("50.00"),
             created_by=self.owner,
         )
@@ -454,7 +438,6 @@ class VendorFoundationTests(TestCase):
         second_allocation = VendorClientAllocation.objects.create(
             vendor=self.external,
             client=second_client,
-            quantity_limit=5,
             created_by=self.owner,
         )
         owner_api = APIClient()
@@ -469,12 +452,88 @@ class VendorFoundationTests(TestCase):
 
         listing = APIClient().get(reverse("survey-list"), HTTP_X_API_KEY=issued.data["api_key"])
         self.assertEqual(listing.status_code, 200)
-        self.assertEqual([row["source_id"] for row in listing.data["results"]], [second_survey.source_id])
+        self.assertEqual([row["source_id"] for row in listing.data["results"]], [second_survey.local_id])
 
         allocation_detail = owner_api.get(
             reverse("vendor-client-allocation-detail", kwargs={"pk": second_allocation.pk})
         )
         self.assertEqual(allocation_detail.data["api_key_scopes"][0]["name"], "One client only")
+
+    def test_api_key_id_mode_hash_entry_and_supplier_outcome_redirect(self):
+        self.external_policy.delivery_mode = VendorCommercialProfile.DeliveryMode.BOTH
+        self.external_policy.save(update_fields=["delivery_mode", "updated_at"])
+        self.survey.entry_link = "https://edgeapi.innovatemr.net/startSurvey?survNum=88001&supCode=1150&PID=[%%pid%%]"
+        self.survey.targeting_synced_at = timezone.now()
+        self.survey.save(update_fields=["entry_link", "targeting_synced_at"])
+        for code in ["projects.view", "survey_links.copy"]:
+            UserFunctionOverride.objects.create(
+                user=self.external,
+                function=AccessFunction.objects.get(code=code),
+                effect=UserFunctionOverride.Effect.ALLOW,
+            )
+
+        owner_api = APIClient()
+        owner_api.force_authenticate(self.owner)
+        issued = owner_api.post(reverse("vendor-api-key-list"), {
+            "vendor": self.external.pk,
+            "name": "Secure supplier feed",
+            "client_allocations": [self.external_client_allocation.pk],
+            "redirect_hash_required": True,
+            "generate_redirect_hash": True,
+            "terminated_redirect_url": "https://supplier.example/terminated",
+        }, format="json")
+        self.assertEqual(issued.status_code, 201, issued.data)
+        self.assertTrue(issued.data["redirect_hash_key"].startswith("vrh_"))
+
+        supplier_api = APIClient()
+        listing = supplier_api.get(reverse("survey-list"), HTTP_X_API_KEY=issued.data["api_key"])
+        row = listing.data["results"][0]
+        self.assertEqual(row["source_id"], self.survey.local_id)
+        self.assertIn("supplierUid={supplier_uid}", row["start_link"])
+        self.assertIn("hash={hash_key}", row["start_link"])
+
+        base_params = {
+            "surveyId": self.survey.local_id,
+            "supplierCode": settings.PUBLIC_SUPPLIER_CODE,
+            "userId": self.external.pk,
+            "code": self.survey.local_id,
+            "keyId": issued.data["prefix"],
+            "supplierUid": "vendor-respondent-42",
+        }
+        invalid = self.client.get(reverse("survey-start"), {**base_params, "hash": "wrong"})
+        self.assertEqual(invalid.status_code, 400)
+        self.assertFalse(SurveyAttempt.objects.filter(supplier_respondent_id="vendor-respondent-42").exists())
+
+        started = self.client.get(
+            reverse("survey-start"),
+            {**base_params, "hash": issued.data["redirect_hash_key"]},
+        )
+        self.assertEqual(started.status_code, 302)
+        attempt = SurveyAttempt.objects.get(supplier_respondent_id="vendor-respondent-42")
+        self.assertEqual(attempt.vendor_api_key_id, issued.data["id"])
+
+        result = self.client.get(reverse("survey-status"), {
+            "status": "2",
+            "rid": attempt.rid,
+            "termReason": "Age quota unavailable",
+            "termReasonCategory": "Targeting",
+        })
+        self.assertEqual(result.status_code, 302)
+        redirected = urlsplit(result["Location"])
+        self.assertEqual(f"{redirected.scheme}://{redirected.netloc}{redirected.path}", "https://supplier.example/terminated")
+        redirect_query = parse_qs(redirected.query)
+        self.assertEqual(redirect_query["supplier_uid"], ["vendor-respondent-42"])
+        self.assertEqual(redirect_query["term_reason"], ["Age quota unavailable"])
+        self.assertEqual(redirect_query["term_category"], ["Targeting"])
+
+        changed = owner_api.patch(
+            reverse("vendor-api-key-detail", kwargs={"pk": issued.data["id"]}),
+            {"survey_id_mode": VendorAPIKey.SurveyIDMode.SOURCE_ID},
+            format="json",
+        )
+        self.assertEqual(changed.status_code, 200, changed.data)
+        source_listing = supplier_api.get(reverse("survey-list"), HTTP_X_API_KEY=issued.data["api_key"])
+        self.assertEqual(source_listing.data["results"][0]["source_id"], self.survey.source_id)
 
     def test_api_key_inherits_live_client_scope_and_different_client_cuts(self):
         self.external_policy.delivery_mode = VendorCommercialProfile.DeliveryMode.BOTH
@@ -493,14 +552,12 @@ class VendorFoundationTests(TestCase):
         second_client_allocation = VendorClientAllocation.objects.create(
             vendor=self.external,
             client=second_client,
-            quantity_limit=4,
             cpi_cut_override_percent=Decimal("50.00"),
             created_by=self.owner,
         )
         VendorSurveyAllocation.objects.create(
             client_allocation=second_client_allocation,
             survey=second_survey,
-            quantity_limit=4,
             created_by=self.owner,
         )
         hidden_client = Client.objects.create(code="api-hidden", name="API Hidden", created_by=self.owner)
@@ -529,15 +586,15 @@ class VendorFoundationTests(TestCase):
         listing = vendor_api.get(reverse("survey-list"), HTTP_X_API_KEY=raw_key)
         self.assertEqual(listing.status_code, 200)
         rows = {item["source_id"]: item for item in listing.data["results"]}
-        self.assertEqual(set(rows), {self.survey.source_id, second_survey.source_id})
-        self.assertEqual(Decimal(rows[self.survey.source_id]["cpi"]), Decimal("7.00"))
-        self.assertEqual(Decimal(rows[self.survey.source_id]["cpi_cut_percent"]), Decimal("30.00"))
-        self.assertEqual(Decimal(rows[second_survey.source_id]["cpi"]), Decimal("5.00"))
-        self.assertEqual(Decimal(rows[second_survey.source_id]["cpi_cut_percent"]), Decimal("50.00"))
-        self.assertEqual(rows[second_survey.source_id]["display_company_name"], second_client.name)
+        self.assertEqual(set(rows), {self.survey.local_id, second_survey.local_id})
+        self.assertEqual(Decimal(rows[self.survey.local_id]["cpi"]), Decimal("7.00"))
+        self.assertEqual(Decimal(rows[self.survey.local_id]["cpi_cut_percent"]), Decimal("30.00"))
+        self.assertEqual(Decimal(rows[second_survey.local_id]["cpi"]), Decimal("5.00"))
+        self.assertEqual(Decimal(rows[second_survey.local_id]["cpi_cut_percent"]), Decimal("50.00"))
+        self.assertEqual(rows[second_survey.local_id]["display_company_name"], second_client.name)
 
         filtered = vendor_api.get(reverse("survey-list"), {"client_name": second_client.name}, HTTP_X_API_KEY=raw_key)
-        self.assertEqual([row["source_id"] for row in filtered.data["results"]], [second_survey.source_id])
+        self.assertEqual([row["source_id"] for row in filtered.data["results"]], [second_survey.local_id])
         UserFunctionOverride.objects.create(
             user=self.external,
             function=AccessFunction.objects.get(code="projects.filter.cpi"),
@@ -551,7 +608,7 @@ class VendorFoundationTests(TestCase):
         self.assertEqual(visible_cpi_filtered.status_code, 200)
         self.assertEqual(
             [row["source_id"] for row in visible_cpi_filtered.data["results"]],
-            [self.survey.source_id],
+            [self.survey.local_id],
         )
         key_record = VendorAPIKey.objects.get(pk=issued.data["id"])
         self.assertIsNotNone(key_record.last_used_at)
@@ -874,16 +931,16 @@ class OrganizationHierarchyTests(TestCase):
 
     def test_internal_vendor_unit_grants_intersect_vendor_allocations(self):
         allocation_a = VendorClientAllocation.objects.create(
-            vendor=self.internal, client=self.client_a, quantity_limit=10, created_by=self.owner,
+            vendor=self.internal, client=self.client_a, created_by=self.owner,
         )
         allocation_b = VendorClientAllocation.objects.create(
-            vendor=self.internal, client=self.client_b, quantity_limit=10, created_by=self.owner,
+            vendor=self.internal, client=self.client_b, created_by=self.owner,
         )
         VendorSurveyAllocation.objects.create(
-            client_allocation=allocation_a, survey=self.survey_a, quantity_limit=10, created_by=self.owner,
+            client_allocation=allocation_a, survey=self.survey_a, created_by=self.owner,
         )
         VendorSurveyAllocation.objects.create(
-            client_allocation=allocation_b, survey=self.survey_b, quantity_limit=10, created_by=self.owner,
+            client_allocation=allocation_b, survey=self.survey_b, created_by=self.owner,
         )
         branch, _, shift = self.create_tree(self.internal, "internal")
         OrganizationClientAccess.objects.create(
@@ -1002,7 +1059,6 @@ class OrganizationHierarchyTests(TestCase):
         VendorClientAllocation.objects.create(
             vendor=self.internal,
             client=self.client_a,
-            quantity_limit=10,
             created_by=self.owner,
         )
         internal_api = APIClient()
