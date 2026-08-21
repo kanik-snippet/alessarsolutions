@@ -8,6 +8,7 @@ from functools import wraps
 
 from django.contrib.auth.views import redirect_to_login
 from django.core.exceptions import PermissionDenied
+from django.db.models import Q
 from rest_framework.permissions import BasePermission
 
 from .models import AccessFunction, EmployeeProfile, Role, UserFunctionOverride
@@ -152,7 +153,8 @@ def activity_visible_user_ids(user) -> set[int]:
 
     Shift assignment determines the Team Lead tracking boundary. A Team Lead
     sees lower-ranked employees only inside the exact Shift to which the lead is
-    assigned. Managers and higher employee roles retain Branch-wide visibility.
+    assigned. Managers and higher employee roles retain Branch-wide visibility;
+    Managers also see activity from other Managers in that same Branch.
     A normal employee can only see their own tracking records, even when another
     user was created beneath them. Vendor and super-admin workspace rules remain
     intact.
@@ -195,26 +197,29 @@ def activity_visible_user_ids(user) -> set[int]:
             while scope_unit.parent_id and scope_unit.unit_type != "branch":
                 scope_unit = scope_unit.parent
         unit_ids = organization_unit_descendant_ids(scope_unit)
-        visible_ids.update(
-            EmployeeProfile.objects.filter(
-                organization_unit_id__in=unit_ids,
-                account_type=EmployeeProfile.AccountType.EMPLOYEE,
-                role__isnull=False,
-                role__rank__lt=profile.role.rank,
-            ).values_list("user_id", flat=True)
-        )
+        eligible_roles = Q(role__rank__lt=profile.role.rank)
+        if profile.role.slug == "manager":
+            eligible_roles |= Q(role_id=profile.role_id)
+        visible_profiles = EmployeeProfile.objects.filter(
+            organization_unit_id__in=unit_ids,
+            account_type=EmployeeProfile.AccountType.EMPLOYEE,
+            role__isnull=False,
+        ).filter(eligible_roles)
+        visible_ids.update(visible_profiles.values_list("user_id", flat=True))
         return visible_ids
 
     if not profile.created_by_id:
         visible_ids.update(subordinate_user_ids(user))
         return visible_ids
 
+    eligible_roles = Q(role__rank__lt=profile.role.rank)
+    if profile.role.slug == "manager":
+        eligible_roles |= Q(role_id=profile.role_id)
     lower_rank_peers = EmployeeProfile.objects.filter(
         created_by_id=profile.created_by_id,
         account_type=EmployeeProfile.AccountType.EMPLOYEE,
         role__isnull=False,
-        role__rank__lt=profile.role.rank,
-    )
+    ).filter(eligible_roles)
     visible_ids.update(lower_rank_peers.values_list("user_id", flat=True))
     return visible_ids
 

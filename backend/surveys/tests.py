@@ -1454,6 +1454,12 @@ class StudiesTrackingTests(TestCase):
         manager = get_user_model().objects.create_user(
             username="tracking-manager", first_name="Branch", last_name="Manager"
         )
+        peer_manager = get_user_model().objects.create_user(
+            username="tracking-manager-peer", first_name="Peer", last_name="Manager"
+        )
+        other_branch_manager = get_user_model().objects.create_user(
+            username="tracking-manager-other", first_name="Mumbai", last_name="Manager"
+        )
         other_shift_employee = get_user_model().objects.create_user(
             username="tracking-evening-employee", first_name="Evening", last_name="Employee"
         )
@@ -1496,6 +1502,8 @@ class StudiesTrackingTests(TestCase):
             (other_shift_employee, "employee", delhi_evening),
             (other_branch_employee, "employee", mumbai_morning),
             (manager, "manager", delhi_morning),
+            (peer_manager, "manager", delhi_evening),
+            (other_branch_manager, "manager", mumbai_morning),
         ]
         for platform_user, role_slug, organization_unit in profiles:
             EmployeeProfile.objects.filter(user=platform_user).update(
@@ -1516,9 +1524,22 @@ class StudiesTrackingTests(TestCase):
             rid="Tl4Oo5Bb6M", survey=self.survey, platform_user=other_branch_employee,
             user_id=str(other_branch_employee.pk), status=SurveyAttempt.Status.COMPLETED, entry_device="Mobile",
         )
-        SurveyAttempt.objects.create(
+        manager_attempt = SurveyAttempt.objects.create(
             rid="Tl7Mm8Cc9R", survey=self.survey, platform_user=manager, user_id=str(manager.pk),
             status=SurveyAttempt.Status.COMPLETED, entry_device="Tablet",
+            source_cpi_snapshot="10.00", payable_cpi_snapshot="10.00", cpi_currency_snapshot="USD",
+        )
+        peer_manager_attempt = SurveyAttempt.objects.create(
+            rid="Pm1Ee2Rr3M", survey=self.survey, platform_user=peer_manager,
+            user_id=str(peer_manager.pk), status=SurveyAttempt.Status.COMPLETED,
+            entry_device="Desktop", source_cpi_snapshot="10.00",
+            payable_cpi_snapshot="10.00", cpi_currency_snapshot="USD",
+        )
+        SurveyAttempt.objects.create(
+            rid="Om1Bb2Rr3M", survey=self.survey, platform_user=other_branch_manager,
+            user_id=str(other_branch_manager.pk), status=SurveyAttempt.Status.COMPLETED,
+            entry_device="Desktop", source_cpi_snapshot="10.00",
+            payable_cpi_snapshot="10.00", cpi_currency_snapshot="USD",
         )
 
         lead_api = APIClient()
@@ -1558,6 +1579,42 @@ class StudiesTrackingTests(TestCase):
         self.assertEqual(second_lead_studies.status_code, 200)
         self.assertEqual(second_lead_studies.data["count"], 1)
         self.assertEqual({row["rid"] for row in second_lead_studies.data["results"]}, {visible_attempt.rid})
+
+        UserFunctionOverride.objects.create(
+            user=manager,
+            function=AccessFunction.objects.get(code="studies.card.revenue"),
+            effect=UserFunctionOverride.Effect.ALLOW,
+        )
+        manager_api = APIClient()
+        manager_api.force_authenticate(manager)
+        manager_studies = manager_api.get(reverse("survey-attempt-list"))
+        self.assertEqual(manager_studies.status_code, 200)
+        self.assertEqual(manager_studies.data["count"], 4)
+        self.assertEqual(
+            {row["rid"] for row in manager_studies.data["results"]},
+            {
+                visible_attempt.rid,
+                other_shift_attempt.rid,
+                manager_attempt.rid,
+                peer_manager_attempt.rid,
+            },
+        )
+        self.assertEqual(str(manager_studies.data["summary"]["total_revenue"]), "10.00")
+        manager_hits = manager_api.get(reverse("user-hits-api"))
+        self.assertEqual(manager_hits.status_code, 200)
+        self.assertEqual(
+            {row["user_id"] for row in manager_hits.data["results"]},
+            {employee.pk, other_shift_employee.pk, manager.pk, peer_manager.pk},
+        )
+
+        peer_manager_api = APIClient()
+        peer_manager_api.force_authenticate(peer_manager)
+        peer_manager_studies = peer_manager_api.get(reverse("survey-attempt-list"))
+        self.assertEqual(peer_manager_studies.status_code, 200)
+        self.assertIn(
+            manager_attempt.rid,
+            {row["rid"] for row in peer_manager_studies.data["results"]},
+        )
 
         for code in ("attempts.view", "user_hits.view"):
             UserFunctionOverride.objects.update_or_create(
