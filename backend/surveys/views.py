@@ -52,7 +52,6 @@ from vendors.services import (
     organization_client_ids_for_user,
     scope_surveys_for_api_key,
     scope_surveys_for_user,
-    visible_amount_for_user,
     visible_cpi_for_user,
 )
 from vendors.access import is_external_vendor_scope, vendor_scope_user_id
@@ -76,6 +75,7 @@ from .report_pricing import (
     supplier_cpi_for_admin,
     supplier_label_for_admin,
     viewer_attempt_cpi,
+    viewer_revenue_total,
 )
 from .serializers import (
     SurveyDetailSerializer,
@@ -2629,7 +2629,6 @@ class SurveyAttemptViewSet(viewsets.ReadOnlyModelViewSet):
             desktop=Count("id", filter=completed_filter & Q(entry_device__icontains="desktop")),
             mobile=Count("id", filter=completed_filter & (Q(entry_device__icontains="mobile") | Q(entry_device__icontains="phone"))),
             tablet=Count("id", filter=completed_filter & (Q(entry_device__icontains="tablet") | Q(entry_device__iexact="tab"))),
-            total_revenue=Sum("source_cpi_snapshot", filter=completed_filter, default=Decimal("0.00")),
             supplier_revenue=Sum(
                 Coalesce("payable_cpi_snapshot", "source_cpi_snapshot"),
                 filter=completed_filter,
@@ -2640,8 +2639,9 @@ class SurveyAttemptViewSet(viewsets.ReadOnlyModelViewSet):
         completed = summary["completed"]
         ir_denominator = completed + summary["survey_terminated"]
         classified = summary["desktop"] + summary["mobile"] + summary["tablet"]
-        summary["total_revenue"] = visible_amount_for_user(
-            self.request.user, summary["total_revenue"]
+        summary["total_revenue"] = viewer_revenue_total(
+            queryset.filter(status=SurveyAttempt.Status.COMPLETED),
+            self.request.user,
         )
         summary["total_revenue"] += historical_revenue_total(
             self.request.user,

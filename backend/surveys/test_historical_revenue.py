@@ -138,6 +138,16 @@ class HistoricalRevenueTests(TestCase):
             Decimal(str(response.data["summary"]["total_revenue"])),
             Decimal("75.25"),
         )
+        dashboard = self.api.get(reverse("dashboard-api"), {"range": "24h"})
+        self.assertEqual(dashboard.status_code, 200)
+        self.assertEqual(
+            Decimal(str(dashboard.data["summary"]["revenue"])),
+            Decimal("77.75"),
+        )
+        self.assertEqual(
+            Decimal(str(dashboard.data["summary"]["rpc"])),
+            Decimal("2.50"),
+        )
 
     def test_superuser_can_assign_revenue_from_simple_admin_form(self):
         self.client.force_login(self.owner)

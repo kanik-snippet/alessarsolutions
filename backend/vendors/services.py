@@ -353,6 +353,8 @@ def role_cpi_visibility_percent(user) -> Decimal:
 
     profile = getattr(user, "employee_profile", None)
     role = getattr(profile, "role", None) if profile else None
+    if role and role.slug in {"super-admin", "superadmin"}:
+        return Decimal("100.00")
     if (
         not getattr(user, "is_superuser", False)
         and profile

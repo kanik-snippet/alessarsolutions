@@ -9,10 +9,10 @@ from django.db.models import Avg, Count, Max, Q, Sum
 from django.utils import timezone
 
 from accounts.access import activity_visible_user_ids
-from vendors.services import visible_amount_for_user, visible_cpi_for_user
-
 from .filters import SurveyAttemptFilter
+from .historical_revenue import historical_revenue_total
 from .models import SurveyAttempt
+from .report_pricing import annotate_viewer_revenue, viewer_revenue_total
 
 
 COMPLETED = SurveyAttempt.Status.COMPLETED
@@ -58,10 +58,6 @@ def dashboard_client_options(queryset):
         {"id": row["survey__client_id"], "name": row["survey__client__name"] or "Unnamed client"}
         for row in rows
     ]
-
-
-def _visible_revenue(user, value):
-    return visible_amount_for_user(user, value or Decimal("0.00"))
 
 
 def _month_shift(value, offset):
@@ -140,7 +136,8 @@ def dashboard_range_window(range_key, now=None):
     }
 
 
-def _performance_series(queryset, range_window):
+def _performance_series(queryset, range_window, user):
+    queryset = annotate_viewer_revenue(queryset, user)
     expressions = {}
     for index, bucket in enumerate(range_window["buckets"]):
         window = Q(initiated_at__gte=bucket["lower"], initiated_at__lt=bucket["upper"])
@@ -152,7 +149,7 @@ def _performance_series(queryset, range_window):
         expressions[f"completes_{index}"] = Count("id", filter=completed)
         expressions[f"terminated_{index}"] = Count("id", filter=survey_terminated)
         expressions[f"revenue_{index}"] = Sum(
-            "source_cpi_snapshot", filter=completed, default=Decimal("0.00")
+            "viewer_revenue", filter=completed, default=Decimal("0.00")
         )
     totals = queryset.aggregate(**expressions)
     points = []
@@ -160,7 +157,9 @@ def _performance_series(queryset, range_window):
         hits = totals[f"hits_{index}"]
         completes = totals[f"completes_{index}"]
         terminated = totals[f"terminated_{index}"]
-        revenue = totals[f"revenue_{index}"] or Decimal("0.00")
+        revenue = (totals[f"revenue_{index}"] or Decimal("0.00")).quantize(
+            Decimal("0.01"), rounding=ROUND_HALF_UP
+        )
         ir_denominator = completes + terminated
         points.append({
             "key": bucket["key"],
@@ -257,15 +256,14 @@ def _range_payload(range_window):
 
 
 def _permission_scoped_performance(queryset, range_window, user, card_access):
-    points = _performance_series(queryset, range_window)
+    points = _performance_series(queryset, range_window, user)
     for point in points:
-        point_revenue = _visible_revenue(user, point["revenue"])
+        point_revenue = point["revenue"]
         point["revenue"] = point_revenue if card_access.get("revenue") else None
         point["average_cpi"] = (
-            visible_cpi_for_user(
-                user,
-                point["revenue"] / point["completes"] if point["completes"] else Decimal("0.00"),
-            )
+            (point_revenue / point["completes"]).quantize(
+                Decimal("0.01"), rounding=ROUND_HALF_UP
+            ) if point["completes"] else Decimal("0.00")
         ) if card_access.get("average_cpi") else None
         point["rpc"] = (
             (point_revenue / point["hits"]).quantize(
@@ -305,7 +303,6 @@ def build_dashboard_payload(
         security=Count("id", filter=Q(status=SurveyAttempt.Status.QUALITY_TERMINATED)),
         active_users=Count("platform_user_id", distinct=True),
         average_loi=Avg("loi_seconds"),
-        revenue=Sum("source_cpi_snapshot", filter=completed_filter, default=Decimal("0.00")),
         currency=Max("cpi_currency_snapshot", filter=completed_filter),
         desktop=Count("id", filter=completed_filter & (Q(entry_device__icontains="desktop") | Q(entry_device__icontains="laptop"))),
         mobile=Count("id", filter=completed_filter & (Q(entry_device__icontains="mobile") | Q(entry_device__icontains="phone"))),
@@ -314,7 +311,14 @@ def build_dashboard_payload(
     conversion = round(totals["completes"] / totals["hits"] * 100, 2) if totals["hits"] else 0.0
     ir_denominator = totals["completes"] + totals["survey_terminated"]
     incidence_rate = round(totals["completes"] / ir_denominator * 100, 2) if ir_denominator else 0.0
-    visible_revenue = _visible_revenue(user, totals["revenue"])
+    attempt_revenue = viewer_revenue_total(
+        queryset.filter(status=COMPLETED), user
+    )
+    historical_revenue = historical_revenue_total(user, {
+        "initiated_from": range_window["start"],
+        "initiated_to": range_window["end"],
+    })
+    visible_revenue = attempt_revenue + historical_revenue
     summary_values = {
         "hits": totals["hits"],
         "completes": totals["completes"],
@@ -324,11 +328,13 @@ def build_dashboard_payload(
         "average_loi_seconds": round(totals["average_loi"] or 0),
         "revenue": visible_revenue,
         "average_cpi": (
-            visible_cpi_for_user(user, totals["revenue"] / totals["completes"])
+            (attempt_revenue / totals["completes"]).quantize(
+                Decimal("0.01"), rounding=ROUND_HALF_UP
+            )
             if totals["completes"] else Decimal("0.00")
         ),
         "rpc": (
-            visible_revenue / totals["hits"]
+            attempt_revenue / totals["hits"]
         ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP) if totals["hits"] else Decimal("0.00"),
         "revenue_currency": totals["currency"] or "USD",
     }

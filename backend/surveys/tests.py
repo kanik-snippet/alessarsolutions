@@ -1120,23 +1120,71 @@ class StudiesTrackingTests(TestCase):
         role.cpi_visibility_percent = "60.00"
         role.save(update_fields=["cpi_visibility_percent"])
         EmployeeProfile.objects.filter(user=self.kanik).update(role=role)
+        UserFunctionOverride.objects.create(
+            user=self.kanik,
+            function=AccessFunction.objects.get(code="studies.card.revenue"),
+            effect=UserFunctionOverride.Effect.ALLOW,
+        )
         self.survey.cpi = "10.00"
         self.survey.save(update_fields=["cpi"])
         self.complete.source_cpi_snapshot = "10.00"
         self.complete.payable_cpi_snapshot = "10.00"
         self.complete.save(update_fields=["source_cpi_snapshot", "payable_cpi_snapshot", "updated_at"])
+        SurveyAttempt.objects.create(
+            rid="Mc1Ap2Su3M",
+            survey=self.survey,
+            platform_user=self.kanik,
+            user_id=str(self.kanik.pk),
+            status=SurveyAttempt.Status.COMPLETED,
+            source_cpi_snapshot="2.00",
+            payable_cpi_snapshot="2.00",
+            cpi_currency_snapshot="USD",
+        )
         manager = get_user_model().objects.get(pk=self.kanik.pk)
         scoped_api = APIClient()
         scoped_api.force_authenticate(manager)
 
         projects = scoped_api.get(reverse("survey-list"), {"search": str(self.survey.source_id)})
-        traffic = scoped_api.get(reverse("survey-attempt-list"), {"search": self.complete.rid})
+        traffic = scoped_api.get(
+            reverse("survey-attempt-list"),
+            {"status": SurveyAttempt.Status.COMPLETED},
+        )
 
         self.assertEqual(projects.status_code, 200)
         self.assertEqual(traffic.status_code, 200)
         self.assertEqual(str(projects.data["results"][0]["cpi"]), "5.00")
-        self.assertEqual(str(traffic.data["results"][0]["source_cpi_snapshot"]), "5.00")
-        self.assertEqual(str(traffic.data["results"][0]["payable_cpi_snapshot"]), "5.00")
+        self.assertEqual(traffic.data["count"], 2)
+        self.assertEqual(
+            {str(item["source_cpi_snapshot"]) for item in traffic.data["results"]},
+            {"5.00", "1.20"},
+        )
+        self.assertEqual(str(traffic.data["summary"]["total_revenue"]), "6.20")
+
+    def test_admin_role_cut_matches_projects_traffic_row_and_revenue(self):
+        role = Role.objects.get(slug="admin")
+        role.cpi_visibility_percent = "80.00"
+        role.save(update_fields=["cpi_visibility_percent"])
+        EmployeeProfile.objects.filter(user=self.kanik).update(role=role)
+        self.survey.cpi = "10.00"
+        self.survey.save(update_fields=["cpi"])
+        self.complete.source_cpi_snapshot = "10.00"
+        self.complete.payable_cpi_snapshot = "10.00"
+        self.complete.save(
+            update_fields=["source_cpi_snapshot", "payable_cpi_snapshot", "updated_at"]
+        )
+        admin_user = get_user_model().objects.get(pk=self.kanik.pk)
+        scoped_api = APIClient()
+        scoped_api.force_authenticate(admin_user)
+
+        projects = scoped_api.get(reverse("survey-list"), {"search": self.survey.local_id})
+        traffic = scoped_api.get(
+            reverse("survey-attempt-list"),
+            {"search": self.complete.rid},
+        )
+
+        self.assertEqual(str(projects.data["results"][0]["cpi"]), "8.00")
+        self.assertEqual(str(traffic.data["results"][0]["source_cpi_snapshot"]), "8.00")
+        self.assertEqual(str(traffic.data["summary"]["total_revenue"]), "8.00")
 
     def test_summary_tracks_all_outcomes_and_completed_device_types(self):
         SurveyAttempt.objects.create(
@@ -2077,6 +2125,50 @@ class DashboardAnalyticsTests(TestCase):
         )
         self.assertEqual(response.data["top_users"][0]["name"], "Dash Employee")
         self.assertNotIn("recent_activity", response.data)
+
+    def test_manager_dashboard_revenue_caps_each_completion_before_sum(self):
+        role = Role.objects.get(slug="manager")
+        role.cpi_visibility_percent = "60.00"
+        role.save(update_fields=["cpi_visibility_percent"])
+        EmployeeProfile.objects.filter(user=self.employee).update(role=role)
+        for code in (
+            "dashboard.view",
+            "dashboard.card.revenue",
+            "dashboard.card.average_cpi",
+            "dashboard.card.rpc",
+            "dashboard.chart.performance",
+        ):
+            UserFunctionOverride.objects.create(
+                user=self.employee,
+                function=AccessFunction.objects.get(code=code),
+                effect=UserFunctionOverride.Effect.ALLOW,
+            )
+        self.complete.source_cpi_snapshot = "10.00"
+        self.complete.save(update_fields=["source_cpi_snapshot", "updated_at"])
+        SurveyAttempt.objects.create(
+            rid="Db1Ca2Pp3D",
+            survey=self.survey_b,
+            platform_user=self.employee,
+            user_id=str(self.employee.pk),
+            status=SurveyAttempt.Status.COMPLETED,
+            source_cpi_snapshot="4.00",
+            cpi_currency_snapshot="USD",
+        )
+        manager = get_user_model().objects.get(pk=self.employee.pk)
+        scoped_api = APIClient()
+        scoped_api.force_authenticate(manager)
+
+        response = scoped_api.get(reverse("dashboard-api"), {"range": "24h"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(str(response.data["summary"]["revenue"]), "7.40")
+        self.assertEqual(str(response.data["summary"]["average_cpi"]), "3.70")
+        self.assertEqual(str(response.data["summary"]["rpc"]), "3.70")
+        points = response.data["finance_chart"]["points"]
+        self.assertEqual(
+            sum(Decimal(str(point["revenue"] or 0)) for point in points),
+            Decimal("7.40"),
+        )
 
     def test_dashboard_supports_every_global_analytics_range(self):
         expected = {
