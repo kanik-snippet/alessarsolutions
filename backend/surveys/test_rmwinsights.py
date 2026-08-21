@@ -81,8 +81,9 @@ class RMWInsightsProviderTests(SimpleTestCase):
 
         normalized = provider.normalize_inventory_item(remote_row(), timezone.now())
 
-        self.assertEqual(normalized.source_key, "20260800002961")
+        self.assertEqual(normalized.source_key, "16120319")
         self.assertEqual(normalized.numeric_source_id, 16120319)
+        self.assertEqual(normalized.raw_data["remote_project_id"], "20260800002961")
         self.assertEqual(normalized.values["country"], "United States")
         self.assertEqual(normalized.values["country_code"], "US")
         self.assertEqual(normalized.values["survey_type"], "B2C")

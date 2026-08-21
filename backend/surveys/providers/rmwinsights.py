@@ -168,18 +168,28 @@ class RMWInsightsProvider(SurveyProvider):
         return urlunsplit((parts.scheme, parts.netloc, parts.path, parts.query, ""))
 
     def normalize_inventory_item(self, payload, seen_at):
-        source_key = str(payload.get("local_id") or "").strip()
-        if not re.fullmatch(r"\d{14}", source_key):
+        remote_project_id = str(payload.get("local_id") or "").strip()
+        if not re.fullmatch(r"\d{14}", remote_project_id):
             raise ProviderError("RMW Insights survey has an invalid remote project ID.")
         upstream_id = str(payload.get("survey_id") or payload.get("source_id") or "").strip()
+        if not upstream_id or len(upstream_id) > 160:
+            raise ProviderError("RMW Insights survey has no valid survey ID.")
         modified = self._datetime(payload.get("source_modified_at") or payload.get("updated_at"))
         created = self._datetime(payload.get("source_created_at") or payload.get("created_at"))
         country, country_code = self._country(payload)
         status = str(payload.get("status") or "").strip().lower()
         group_type = str(payload.get("survey_type") or payload.get("group_type") or "").strip().upper()
-        raw_data = {**payload, "adapter": "rmwinsights_v1", "remote_project_id": source_key}
+        raw_data = {
+            **payload,
+            "adapter": "rmwinsights_v1",
+            "remote_project_id": remote_project_id,
+        }
         return NormalizedSurvey(
-            source_key=source_key,
+            # The supplier API exposes both its own platform Project ID and
+            # InnovateMR's survey ID. The project ID remains the detail/link
+            # lookup key, but the Survey ID column must show the real upstream
+            # survey identifier.
+            source_key=upstream_id,
             numeric_source_id=int(upstream_id) if upstream_id.isdigit() else None,
             modified_at=modified,
             raw_data=raw_data,
