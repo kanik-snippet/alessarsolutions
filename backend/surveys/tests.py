@@ -1511,6 +1511,8 @@ class StudiesTrackingTests(TestCase):
                 created_by=self.owner,
                 organization_unit=organization_unit,
             )
+        manager = get_user_model().objects.get(pk=manager.pk)
+        peer_manager = get_user_model().objects.get(pk=peer_manager.pk)
 
         visible_attempt = SurveyAttempt.objects.create(
             rid="Tl1Ee2Aa3D", survey=self.survey, platform_user=employee, user_id=str(employee.pk),
