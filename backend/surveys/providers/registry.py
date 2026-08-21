@@ -8,12 +8,14 @@ def _provider_classes():
 
     from .cint import CintProvider
     from .enligne import EnligneProvider
+    from .rmwinsights import RMWInsightsProvider
     from .rfg import ResearchForGoodProvider
 
     return {
         ResearchForGoodProvider.code: ResearchForGoodProvider,
         CintProvider.code: CintProvider,
         EnligneProvider.code: EnligneProvider,
+        RMWInsightsProvider.code: RMWInsightsProvider,
     }
 
 
