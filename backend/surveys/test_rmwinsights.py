@@ -3,6 +3,8 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 from urllib.parse import parse_qs, urlsplit
 
+from django.conf import settings
+from django.contrib.auth import get_user_model
 from django.core.management import call_command
 from django.test import SimpleTestCase, TestCase
 from django.urls import reverse
@@ -99,12 +101,12 @@ class RMWInsightsProviderTests(SimpleTestCase):
 
         outbound = provider.build_outbound_url(
             survey,
-            SimpleNamespace(rid="Ab3De6Gh9J"),
+            SimpleNamespace(rid="Ab3De6Gh9J", pid="Px7Qa2B"),
             {"ignored": "answer"},
         )
         query = parse_qs(urlsplit(outbound).query)
 
-        self.assertEqual(query["pid"], ["Ab3De6Gh9J"])
+        self.assertEqual(query["pid"], ["Px7Qa2B"])
         self.assertEqual(query["key"], ["key-id"])
         self.assertEqual(query["token"], ["signed-token"])
         self.assertEqual(query["survey"], ["20260800002961"])
@@ -200,6 +202,36 @@ class RMWInsightsDetailsTests(TestCase):
         detail_client.get_quota_for_survey.assert_called_once_with(16120319)
         detail_client.get_survey_targeting.assert_called_once_with(16120319)
 
+    @patch("surveys.providers.rmwinsights.resolve_integration_token", return_value="secret")
+    def test_disabled_local_prescreener_creates_attempt_and_redirects_directly(self, _token):
+        self.integration.local_prescreener_enabled = False
+        self.integration.save(update_fields=["local_prescreener_enabled", "updated_at"])
+        operator = get_user_model().objects.create_superuser(
+            username="rmw-direct-operator",
+            email="rmw-direct@example.test",
+            password="test-password",
+        )
+
+        response = self.client.get(reverse("survey-start"), {
+            "surveyId": self.survey.source_key,
+            "supplierCode": settings.PUBLIC_SUPPLIER_CODE,
+            "userId": str(operator.pk),
+            "code": self.survey.local_id,
+            "pid": "Px7Qa2B",
+        })
+
+        attempt = SurveyAttempt.objects.get(survey=self.survey, platform_user=operator)
+        query = parse_qs(urlsplit(response.url).query)
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(urlsplit(response.url).hostname, "api.rmwinsights.com")
+        self.assertEqual(query["pid"], [attempt.pid])
+        self.assertEqual(attempt.pid, "Px7Qa2B")
+        self.assertEqual(attempt.status, SurveyAttempt.Status.REDIRECTED)
+        self.assertEqual(attempt.answers, {})
+        self.assertTrue(
+            attempt.upstream_transaction_data["local_prescreener"]["bypassed"]
+        )
+
     @patch("surveys.rmw_callbacks.get_provider")
     def test_unknown_remote_rid_is_attached_to_matching_local_attempt(self, get_provider):
         started = timezone.now() - timedelta(seconds=30)
@@ -240,6 +272,44 @@ class RMWInsightsDetailsTests(TestCase):
         self.assertEqual(
             attempt.upstream_transaction_data["rmwinsights_callback"]["rid"],
             "lGmOI3Sfo3",
+        )
+
+    @patch("surveys.rmw_callbacks.get_provider")
+    def test_remote_pid_maps_exactly_even_when_respondent_ip_changes(self, get_provider):
+        attempt = SurveyAttempt.objects.create(
+            rid="Lo9Ca4RidP",
+            pid="Px7Qa2B",
+            survey=self.survey,
+            client=self.client_record,
+            user_id="respondent-ip-change",
+            status=SurveyAttempt.Status.REDIRECTED,
+            initiation_ip="173.34.3.177",
+        )
+        get_provider.return_value.remote_attempt.return_value = {
+            "rid": "Rm8Re3RidX",
+            "pid": attempt.pid,
+            "status": "4",
+            "survey_source_id": "16120319",
+            "entry_ip": "24.202.136.229",
+            "initiated_at": timezone.now().isoformat(),
+            "callback_at": timezone.now().isoformat(),
+            "callback_ip": "54.164.191.203",
+            "is_verified": False,
+        }
+
+        response = self.client.get(
+            reverse("survey-status"),
+            {"status": "4", "rid": "Rm8Re3RidX"},
+            REMOTE_ADDR="24.202.136.229",
+        )
+
+        attempt.refresh_from_db()
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(attempt.status, SurveyAttempt.Status.QUALITY_TERMINATED)
+        self.assertEqual(attempt.status_source, "rmwinsights_callback")
+        self.assertEqual(
+            attempt.upstream_transaction_data["rmwinsights_callback"]["pid"],
+            "Px7Qa2B",
         )
 
     @patch("surveys.rmw_callbacks.get_provider")

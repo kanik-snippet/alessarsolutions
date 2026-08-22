@@ -286,12 +286,19 @@ class RMWInsightsProvider(SurveyProvider):
             survey.save(update_fields=["has_quota", "updated_at"])
 
     def build_outbound_url(self, survey, attempt, answers):
+        # RMW is itself an Alessar-style platform. Its supplier-entry ``pid``
+        # contract accepts the short platform PID, not our 10-character RID.
+        # RMW preserves this value on its remote attempt, giving callbacks a
+        # deterministic bridge back to the canonical local RID.
+        tracking_pid = str(getattr(attempt, "pid", "") or "").strip()
+        if not re.fullmatch(r"[A-Za-z0-9]{6,9}", tracking_pid):
+            raise ProviderError("RMW Insights requires a valid Alessar platform PID.")
         parts = urlsplit(self._entry_link({"supplier_entry_link": survey.entry_link}))
         query = []
         found_pid = False
         for key, value in parse_qsl(parts.query, keep_blank_values=True):
             if key.casefold() == "pid":
-                query.append((key, attempt.rid))
+                query.append((key, tracking_pid))
                 found_pid = True
             else:
                 query.append((key, value))

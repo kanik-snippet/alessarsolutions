@@ -36,7 +36,7 @@ def safe_remote_attempt(payload):
 
 
 def matching_local_attempt(integration, payload, *, request_ip=""):
-    """Match one authenticated remote attempt by survey, IP and nearest start time."""
+    """Match an authenticated remote attempt by exact PID, then legacy audit signals."""
 
     remote_rid = str(payload.get("rid") or "").strip()
     stored = SurveyAttempt.objects.filter(
@@ -47,17 +47,34 @@ def matching_local_attempt(integration, payload, *, request_ip=""):
         return stored
 
     survey_id = str(payload.get("survey_source_id") or "").strip()
+    if not remote_rid or not survey_id:
+        return None
+    survey_identity = Q(survey__source_key=survey_id)
+    if survey_id.isdigit():
+        survey_identity |= Q(survey__source_id=int(survey_id))
+
+    # New RMW journeys receive our 6-9 character platform PID. This lookup is
+    # globally unique locally and remains safe even when a respondent's IP
+    # changes between the two pre-screeners or during the provider survey.
+    remote_pid = str(payload.get("pid") or "").strip()
+    if remote_pid.isalnum() and 6 <= len(remote_pid) <= 9:
+        exact = SurveyAttempt.objects.filter(
+            survey__integration=integration,
+            pid=remote_pid,
+        ).filter(survey_identity).first()
+        if exact is not None:
+            return exact
+
+    # Historical RMW attempts were sent our 10-character RID in a field RMW
+    # did not retain. Keep the previous bounded heuristic only for those rows.
     entry_ip = str(payload.get("entry_ip") or payload.get("initiation_ip") or "").strip()
     remote_started = parse_datetime(str(payload.get("initiated_at") or ""))
-    if not remote_rid or not survey_id or not entry_ip or remote_started is None:
+    if not entry_ip or remote_started is None:
         return None
     if timezone.is_naive(remote_started):
         remote_started = timezone.make_aware(remote_started, timezone.get_current_timezone())
     if request_ip and request_ip != entry_ip:
         return None
-    survey_identity = Q(survey__source_key=survey_id)
-    if survey_id.isdigit():
-        survey_identity |= Q(survey__source_id=int(survey_id))
     candidates = list(
         SurveyAttempt.objects.filter(
             survey__integration=integration,

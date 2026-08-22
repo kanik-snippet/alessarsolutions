@@ -1503,7 +1503,13 @@ def _finish_wrong_target_country_attempt(attempt, request, location):
     return locked
 
 
-def _mark_attempt_redirected(attempt, answers, outbound_url):
+def _mark_attempt_redirected(
+    attempt,
+    answers,
+    outbound_url,
+    *,
+    local_prescreener_bypassed=False,
+):
     """Atomically claim one initiated attempt for its provider redirect.
 
     Provider adapters can touch the separate prescreener-vault database while
@@ -1515,17 +1521,23 @@ def _mark_attempt_redirected(attempt, answers, outbound_url):
     """
 
     now = timezone.now()
+    update_values = {
+        "answers": operational_answer_value(answers),
+        "submitted_at": now,
+        "redirected_at": now,
+        "outbound_url": outbound_url,
+        "status": SurveyAttempt.Status.REDIRECTED,
+        "updated_at": now,
+    }
+    if local_prescreener_bypassed:
+        update_values["upstream_transaction_data"] = {
+            **(attempt.upstream_transaction_data or {}),
+            "local_prescreener": {"bypassed": True},
+        }
     updated = SurveyAttempt.objects.filter(
         pk=attempt.pk,
         status=SurveyAttempt.Status.INITIATED,
-    ).update(
-        answers=operational_answer_value(answers),
-        submitted_at=now,
-        redirected_at=now,
-        outbound_url=outbound_url,
-        status=SurveyAttempt.Status.REDIRECTED,
-        updated_at=now,
-    )
+    ).update(**update_values)
     return bool(updated)
 
 
@@ -1636,6 +1648,10 @@ def survey_start(request):
         provider_code = (
             survey.integration.provider_code if survey.integration_id else ""
         )
+        local_prescreener_enabled = bool(
+            not survey.integration_id
+            or survey.integration.local_prescreener_enabled
+        )
         is_rfg = provider_code == "rfg"
         supports_lazy_entry_link = provider_code in {"rfg", "cint"}
         if not survey.entry_link and not supports_lazy_entry_link:
@@ -1669,10 +1685,14 @@ def survey_start(request):
                     status_code=503,
                 )
 
-        stale = survey.targeting_synced_at is None or (
-            survey.source_modified_at and survey.targeting_synced_at < survey.source_modified_at
+        stale = local_prescreener_enabled and (
+            survey.targeting_synced_at is None
+            or (
+                survey.source_modified_at
+                and survey.targeting_synced_at < survey.source_modified_at
+            )
         )
-        if provider_code in {"biobrain", "voqall"} and survey.targeting_questions.filter(
+        if local_prescreener_enabled and provider_code in {"biobrain", "voqall"} and survey.targeting_questions.filter(
             Q(text="") | Q(key__regex=r"^\d+$")
         ).exists():
             stale = True
@@ -1739,6 +1759,47 @@ def survey_start(request):
                     )
         except AllocationUnavailable as exc:
             return _invalid_survey_link(request, str(exc), status_code=409)
+        if not local_prescreener_enabled:
+            try:
+                provider = (
+                    get_provider(survey.integration)
+                    if survey.integration_id and has_provider(provider_code)
+                    else None
+                )
+                outbound_url = (
+                    provider.build_outbound_url(survey, attempt, {})
+                    if provider
+                    else build_outbound_url(
+                        survey.entry_link,
+                        attempt.rid,
+                        {},
+                        prescreener_uid=attempt.prescreener_uid or "",
+                    )
+                )
+                if not _mark_attempt_redirected(
+                    attempt,
+                    {},
+                    outbound_url,
+                    local_prescreener_bypassed=True,
+                ):
+                    return _invalid_survey_link(
+                        request,
+                        "This survey attempt has already been used.",
+                        status_code=409,
+                    )
+                return HttpResponseRedirect(outbound_url)
+            except Exception as exc:
+                logger.exception(
+                    "Direct provider continuation failed for rid=%s provider=%s",
+                    attempt.rid,
+                    provider_code or "legacy",
+                )
+                detail = (
+                    str(exc)
+                    if isinstance(exc, ProviderError)
+                    else "The upstream provider is temporarily unavailable."
+                )
+                return _invalid_survey_link(request, detail, status_code=503)
         if targeting_warning:
             request.session[f"attempt_warning_{attempt.rid}"] = targeting_warning
         return HttpResponseRedirect(f"{reverse('survey-start')}?rid={quote(attempt.rid)}")

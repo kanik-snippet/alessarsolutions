@@ -71,6 +71,14 @@ class ClientIntegration(models.Model):
         help_text="Provider credential names mapped to environment-variable names; never secret values.",
     )
     config = models.JSONField(default=dict, blank=True, help_text="Non-secret provider configuration.")
+    local_prescreener_enabled = models.BooleanField(
+        default=True,
+        db_index=True,
+        help_text=(
+            "Run the Alessar pre-screener before redirecting to this client's entry link. "
+            "Disable it when the client already provides its own pre-screener."
+        ),
+    )
     profile_reuse_enabled = models.BooleanField(
         default=False,
         db_index=True,

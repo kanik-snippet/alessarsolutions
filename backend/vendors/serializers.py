@@ -141,7 +141,7 @@ class ClientIntegrationSerializer(serializers.ModelSerializer):
         model = ClientIntegration
         fields = [
             "id", "client", "client_name", "name", "provider_code", "base_url", "credential_env_key",
-            "credential_env_keys", "config",
+            "credential_env_keys", "config", "local_prescreener_enabled",
             "profile_reuse_enabled", "profile_reuse_eligible_after_days",
             "profile_reuse_monthly_percentage", "profile_reuse_country_codes",
             "profile_reuse_age_groups", "profile_reuse_genders",
