@@ -13,6 +13,7 @@ from django.utils import timezone
 from vendors.models import Client, ClientIntegration
 
 from .models import Survey, SurveyAttempt
+from .outcomes import provider_outcome
 from .providers.rmwinsights import RMWInsightsProvider
 
 
@@ -265,7 +266,7 @@ class RMWInsightsDetailsTests(TestCase):
 
         attempt.refresh_from_db()
         self.assertEqual(response.status_code, 302)
-        self.assertIn(f"status=4&pid={attempt.pid}", response.url)
+        self.assertIn(f"status=4&rid={attempt.rid}", response.url)
         self.assertEqual(attempt.status, SurveyAttempt.Status.QUALITY_TERMINATED)
         self.assertEqual(attempt.status_source, "rmwinsights_callback")
         self.assertEqual(attempt.callback_count, 1)
@@ -273,6 +274,50 @@ class RMWInsightsDetailsTests(TestCase):
             attempt.upstream_transaction_data["rmwinsights_callback"]["rid"],
             "lGmOI3Sfo3",
         )
+
+    def test_pid_callback_cleans_to_local_rid_and_renders_both_ids(self):
+        attempt = SurveyAttempt.objects.create(
+            rid="Local8RidQ",
+            pid="Qh7QaI4",
+            survey=self.survey,
+            client=self.client_record,
+            user_id="respondent-direct-pid",
+            status=SurveyAttempt.Status.REDIRECTED,
+        )
+
+        callback = self.client.get(
+            reverse("survey-status"),
+            {"status": "4", "rid": attempt.pid},
+        )
+
+        attempt.refresh_from_db()
+        self.assertEqual(callback.status_code, 302)
+        self.assertEqual(
+            callback["Location"],
+            f"{reverse('survey-status')}?status=4&rid={attempt.rid}",
+        )
+        self.assertEqual(attempt.status, SurveyAttempt.Status.QUALITY_TERMINATED)
+        self.assertEqual(attempt.status_source, "rmwinsights_pid_callback")
+        self.assertEqual(attempt.callback_count, 1)
+
+        result = self.client.get(callback["Location"])
+        attempt.refresh_from_db()
+        self.assertEqual(result.status_code, 200)
+        self.assertContains(result, attempt.rid)
+        self.assertContains(result, attempt.pid)
+        self.assertEqual(attempt.callback_count, 1)
+
+    def test_numeric_rmw_status_is_human_readable_in_term_reports(self):
+        attempt = SurveyAttempt.objects.create(
+            rid="Local9RidR",
+            survey=self.survey,
+            client=self.client_record,
+            user_id="respondent-numeric-status",
+            status=SurveyAttempt.Status.QUALITY_TERMINATED,
+            upstream_transaction_data={"browser_return": {"status": "4"}},
+        )
+
+        self.assertEqual(provider_outcome(attempt)["status"], "Quality terminated")
 
     @patch("surveys.rmw_callbacks.get_provider")
     def test_remote_pid_maps_exactly_even_when_respondent_ip_changes(self, get_provider):

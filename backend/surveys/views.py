@@ -2398,9 +2398,13 @@ def survey_status(request):
         )
         status_label = attempt.get_status_display()
     elif attempt:
-        canonical_query = set(request.GET.keys()) == {"status", "pid"} and (
+        canonical_pid_query = set(request.GET.keys()) == {"status", "pid"} and (
             request.GET.get("pid", "").strip() == attempt.pid
         )
+        canonical_rid_query = set(request.GET.keys()) == {"status", "rid"} and (
+            request.GET.get("rid", "").strip() == attempt.rid
+        )
+        canonical_query = canonical_pid_query or canonical_rid_query
         with transaction.atomic():
             attempt = SurveyAttempt.objects.select_related(
                 "survey__integration"
@@ -2419,7 +2423,11 @@ def survey_status(request):
                 attempt.exit_os = exit_client_data.get("os", "")
                 attempt.exit_client_data = exit_client_data
                 attempt.status_source = (
-                    "rmwinsights_callback" if rmw_callback else "browser_callback"
+                    "rmwinsights_callback"
+                    if rmw_callback
+                    else "rmwinsights_pid_callback"
+                    if provider_code == "rmwinsights" and callback_identifier == attempt.pid
+                    else "browser_callback"
                 )
             update_fields = [
                 "callback_at", "callback_ip", "loi_seconds", "status",
@@ -2460,7 +2468,12 @@ def survey_status(request):
             supplier_url = _external_supplier_outcome_url(attempt, status_code)
             if supplier_url:
                 return HttpResponseRedirect(supplier_url)
-            clean_query = urlencode({"status": status_code, "pid": attempt.pid})
+            clean_identifier = (
+                {"rid": attempt.rid}
+                if provider_code == "rmwinsights"
+                else {"pid": attempt.pid}
+            )
+            clean_query = urlencode({"status": status_code, **clean_identifier})
             return HttpResponseRedirect(f"{reverse('survey-status')}?{clean_query}")
     else:
         status_label = "Unknown attempt"

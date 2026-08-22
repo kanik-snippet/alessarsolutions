@@ -3,6 +3,14 @@
 from .rfg_outcomes import describe_rfg_outcome
 
 
+PLATFORM_STATUS_LABELS = {
+    "1": "Completed",
+    "2": "Terminated",
+    "3": "Quota full",
+    "4": "Quality terminated",
+}
+
+
 def _nested_value(payload, path):
     if not path:
         return ""
@@ -36,6 +44,13 @@ def _text(value):
         values = [_text(item) for item in value]
         return ", ".join(dict.fromkeys(item for item in values if item))
     return ""
+
+
+def _status_text(value):
+    """Render platform callback codes as outcomes instead of raw digits."""
+
+    text_value = _text(value)
+    return PLATFORM_STATUS_LABELS.get(text_value, text_value)
 
 
 def provider_outcome(attempt):
@@ -95,7 +110,9 @@ def provider_outcome(attempt):
         return ""
 
     return {
-        "status": mapped_or_common("status", ("status", "Status", "resultStatus", "outcome")),
+        "status": _status_text(
+            mapped_or_common("status", ("status", "Status", "resultStatus", "outcome"))
+        ),
         "reason": mapped_or_common(
             "reason", ("termReason", "term_reason", "reason", "ruledOutBy", "message", "description")
         ),
