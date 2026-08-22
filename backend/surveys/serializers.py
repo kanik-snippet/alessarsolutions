@@ -112,7 +112,22 @@ class SurveyQuotaSerializer(serializers.ModelSerializer):
         datapoints = raw.get("datapoints")
         if not isinstance(datapoints, list):
             datapoints = (obj.targeting or {}).get("datapoints")
-        return datapoints if isinstance(datapoints, list) else []
+        if isinstance(datapoints, list):
+            return datapoints
+        provider_code = (
+            obj.survey.integration.provider_code
+            if obj.survey.integration_id else "innovatemr"
+        )
+        if provider_code not in {"innovatemr", "rmwinsights"}:
+            return []
+        # InnovateMR stores quota targeting as ``QuestionKey: [answer rows]``
+        # rather than the generic datapoint array used by other providers.
+        targeting = obj.targeting if isinstance(obj.targeting, dict) else {}
+        return [
+            {"name": key, "values": values}
+            for key, values in targeting.items()
+            if key != "datapoints" and isinstance(values, list) and values
+        ]
 
     def get_scope_label(self, obj) -> str:
         if self._is_toluna(obj):
@@ -176,8 +191,8 @@ class SurveyQuotaSerializer(serializers.ModelSerializer):
                 continue
             name = str(datapoint.get("name") or datapoint.get("property") or "Targeting")
             question = next((item for item in questions if (
-                str((item.raw_data or {}).get("targeting", {}).get("name") or "") == name
-                or item.key == name
+                str((item.raw_data or {}).get("targeting", {}).get("name") or "").casefold() == name.casefold()
+                or str(item.key or "").casefold() == name.casefold()
             )), None)
             option_labels = {
                 str(option.get("OptionId")): clean_rfg_display_text(option.get("OptionText"))
@@ -185,25 +200,44 @@ class SurveyQuotaSerializer(serializers.ModelSerializer):
                 if isinstance(option, dict)
             }
             values = []
+            answer_ids = []
             for value in datapoint.get("values") or []:
                 if not isinstance(value, dict):
                     values.append(str(value))
+                    answer_ids.append(None)
                     continue
                 range_label = self._range_label(value)
                 if range_label:
                     values.append(range_label)
+                    answer_id = value.get("OptionId", value.get("AnswerId"))
+                    answer_ids.append(
+                        str(answer_id) if answer_id not in (None, "") else None
+                    )
                     continue
                 choice = value.get("choice")
+                if choice is None:
+                    choice = value.get("OptionId", value.get("AnswerId"))
                 if choice is not None:
-                    if name.lower() == "gender":
+                    answer_ids.append(str(choice))
+                    direct_label = value.get("OptionText") or value.get("AnswerText")
+                    if direct_label not in (None, ""):
+                        values.append(clean_rfg_display_text(direct_label))
+                    elif name.lower() == "gender":
                         values.append({"1": "Male", "2": "Female"}.get(str(choice), str(choice)))
                     else:
-                        values.append(option_labels.get(str(choice), f"Choice {choice}"))
+                        values.append(option_labels.get(str(choice), f"Answer ID {choice}"))
                     continue
                 free_value = value.get("value", value.get("text", value.get("freeList")))
                 if free_value not in (None, ""):
                     values.append(str(free_value))
-            details.append({"name": clean_rfg_display_text(name), "values": values or ["Provider-defined segment"]})
+                    answer_ids.append(None)
+            details.append({
+                "name": clean_rfg_display_text(question.text if question else name),
+                "question_key": question.key if question else name,
+                "question_id": question.question_id if question else None,
+                "values": values or ["Provider-defined segment"],
+                "answer_ids": answer_ids,
+            })
         return details
 
 

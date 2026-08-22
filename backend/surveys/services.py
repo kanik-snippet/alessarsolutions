@@ -3,6 +3,7 @@
 import hashlib
 import json
 import logging
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone as dt_timezone
 from decimal import Decimal, InvalidOperation
@@ -41,11 +42,98 @@ def _decimal(value: Any) -> Decimal | None:
 
 
 def _stable_question_id(item: dict[str, Any]) -> int:
-    parsed = _integer(item.get("QuestionId"), -1)
-    if parsed >= 0:
-        return parsed
+    for key in (
+        "QuestionId", "QuestionID", "questionId", "question_id",
+        "QualificationId", "QualificationID", "qualificationId",
+    ):
+        parsed = _integer(item.get(key), -1)
+        if parsed >= 0:
+            return parsed
+    question_key = str(
+        item.get("QuestionKey") or item.get("questionKey") or item.get("key") or ""
+    ).strip()
+    suffix = re.search(r"(?:_|-)(\d+)$", question_key)
+    if suffix:
+        return int(suffix.group(1))
     digest = hashlib.sha256(json.dumps(item, sort_keys=True, default=str).encode()).hexdigest()
     return -int(digest[:12], 16)
+
+
+def _first_payload_value(payload: dict[str, Any], keys, default=""):
+    for key in keys:
+        value = payload.get(key)
+        if value not in (None, ""):
+            return value
+    return default
+
+
+def _normalize_targeting_option(option: Any) -> dict[str, Any] | None:
+    """Normalize Innovate question/quota answer aliases without losing ranges."""
+
+    if not isinstance(option, dict):
+        value = str(option or "").strip()
+        return {"OptionId": value, "OptionText": value} if value else None
+    normalized = dict(option)
+    option_id = _first_payload_value(
+        option,
+        (
+            "OptionId", "OptionID", "optionId", "option_id", "AnswerId",
+            "AnswerID", "answerId", "Precode", "precode", "id", "value",
+        ),
+    )
+    option_text = _first_payload_value(
+        option,
+        (
+            "OptionText", "optionText", "option_text", "AnswerText",
+            "answerText", "label", "text", "name",
+        ),
+    )
+    if option_id not in (None, ""):
+        normalized["OptionId"] = option_id
+    if option_text not in (None, ""):
+        normalized["OptionText"] = str(option_text)
+    for canonical, aliases in (
+        ("ageStart", ("ageStart", "AgeStart", "min", "Min")),
+        ("ageEnd", ("ageEnd", "AgeEnd", "max", "Max")),
+    ):
+        value = _first_payload_value(option, aliases, None)
+        if value is not None:
+            normalized[canonical] = value
+    if normalized.get("OptionId") in (None, "") and normalized.get("ageStart") is None:
+        return None
+    return normalized
+
+
+def _normalize_targeting_item(item: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(item)
+    aliases = {
+        "QuestionId": (
+            "QuestionId", "QuestionID", "questionId", "question_id",
+            "QualificationId", "QualificationID", "qualificationId",
+        ),
+        "QuestionKey": ("QuestionKey", "questionKey", "question_key", "key", "code"),
+        "QuestionText": (
+            "QuestionText", "questionText", "question_text", "text", "label", "name",
+        ),
+        "QuestionType": ("QuestionType", "questionType", "question_type", "type", "typeName"),
+        "QuestionCategory": (
+            "QuestionCategory", "questionCategory", "question_category", "category",
+        ),
+    }
+    for canonical, keys in aliases.items():
+        value = _first_payload_value(item, keys)
+        if value not in (None, ""):
+            normalized[canonical] = value
+    raw_options = _first_payload_value(
+        item, ("Options", "options", "Answers", "answers", "AnswerOptions"), []
+    )
+    normalized["Options"] = [
+        option
+        for raw_option in (raw_options if isinstance(raw_options, list) else [])
+        if (option := _normalize_targeting_option(raw_option)) is not None
+    ]
+    normalized["QuestionId"] = _stable_question_id(normalized)
+    return normalized
 
 
 def parse_upstream_datetime(value: Any) -> datetime | None:
@@ -179,6 +267,12 @@ def replace_survey_targeting(client: InnovateMRClient, survey: Survey) -> None:
             targeting = client.get_survey_targeting(survey.source_id)
     except InnovateMRNotFound:
         targeting = []
+    # Question and answer IDs are scoped to the targeting endpoint. Quota
+    # rows can reuse the same Answer ID for a different range, so they must
+    # remain independent instead of being unioned into this option list.
+    targeting = [
+        _normalize_targeting_item(item) for item in targeting if isinstance(item, dict)
+    ]
     with transaction.atomic():
         survey.targeting_questions.all().delete()
         TargetingQuestion.objects.bulk_create([

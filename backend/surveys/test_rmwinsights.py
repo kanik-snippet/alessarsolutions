@@ -12,9 +12,10 @@ from django.utils import timezone
 
 from vendors.models import Client, ClientIntegration
 
-from .models import Survey, SurveyAttempt
+from .models import Survey, SurveyAttempt, SurveyQuota, TargetingQuestion
 from .outcomes import provider_outcome
 from .providers.rmwinsights import RMWInsightsProvider
+from .serializers import SurveyQuotaSerializer, TargetingQuestionSerializer
 
 
 def remote_row(**overrides):
@@ -176,7 +177,9 @@ class RMWInsightsDetailsTests(TestCase):
         detail_client.get_quota_for_survey.return_value = [{
             "_id": "quota-9001", "id": 9001, "quotaName": "Total",
             "quotaN": 175, "RemainingN": 170, "cmp": 5, "clk": 12,
-            "quotaStatus": "Open", "targeting": {"Conditions": []},
+            "quotaStatus": "Open", "targeting": {
+                "GENDER": [{"OptionId": 2, "OptionText": "Female"}],
+            },
         }]
         detail_client.get_survey_targeting.return_value = [{
             "QuestionId": 59, "QuestionKey": "GENDER",
@@ -196,7 +199,27 @@ class RMWInsightsDetailsTests(TestCase):
         self.survey.refresh_from_db()
         self.assertEqual(self.survey.quotas.count(), 1)
         self.assertEqual(self.survey.targeting_questions.count(), 1)
-        self.assertEqual(self.survey.targeting_questions.get().question_id, 59)
+        question = self.survey.targeting_questions.get()
+        self.assertEqual(question.question_id, 59)
+        self.assertEqual(
+            {str(option["OptionId"]) for option in question.options},
+            {"1"},
+        )
+        serialized_question = TargetingQuestionSerializer(question).data
+        self.assertEqual(
+            {str(option["OptionId"]) for option in serialized_question["options"]},
+            {"1"},
+        )
+        quota_details = SurveyQuotaSerializer(self.survey.quotas.get()).data[
+            "targeting_details"
+        ]
+        self.assertEqual(quota_details, [{
+            "name": "What is your gender?",
+            "question_key": "GENDER",
+            "question_id": 59,
+            "values": ["Female"],
+            "answer_ids": ["2"],
+        }])
         self.assertTrue(self.survey.has_quota)
         self.assertIsNotNone(self.survey.detail_synced_at)
         self.assertEqual(self.survey.entry_link, original_link)
@@ -231,6 +254,35 @@ class RMWInsightsDetailsTests(TestCase):
         self.assertEqual(attempt.answers, {})
         self.assertTrue(
             attempt.upstream_transaction_data["local_prescreener"]["bypassed"]
+        )
+
+    def test_quota_answer_ids_remain_scoped_to_their_own_ranges(self):
+        TargetingQuestion.objects.create(
+            survey=self.survey,
+            question_id=1,
+            key="AGE",
+            text="What is your age?",
+            question_type="Numeric",
+            options=[{"OptionId": 1, "ageStart": 25, "ageEnd": 34}],
+        )
+        quota = SurveyQuota.objects.create(
+            survey=self.survey,
+            source_key="quota-age-18-24",
+            quota_id=9002,
+            targeting={
+                "AGE": [{"OptionId": 1, "ageStart": 18, "ageEnd": 24}],
+            },
+        )
+
+        detail = SurveyQuotaSerializer(quota).data["targeting_details"][0]
+
+        self.assertEqual(detail["question_id"], 1)
+        self.assertEqual(detail["question_key"], "AGE")
+        self.assertEqual(detail["values"], ["18\u201324"])
+        self.assertEqual(detail["answer_ids"], ["1"])
+        self.assertEqual(
+            TargetingQuestion.objects.get(survey=self.survey).options,
+            [{"OptionId": 1, "ageStart": 25, "ageEnd": 34}],
         )
 
     @patch("surveys.rmw_callbacks.get_provider")
