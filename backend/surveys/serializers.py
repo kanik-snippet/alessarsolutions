@@ -140,7 +140,12 @@ class SurveyQuotaSerializer(serializers.ModelSerializer):
 
     @staticmethod
     def _range_label(value) -> str:
-        minimum, maximum = value.get("min"), value.get("max")
+        minimum = value.get("min")
+        maximum = value.get("max")
+        if minimum is None:
+            minimum = value.get("ageStart", value.get("AgeStart"))
+        if maximum is None:
+            maximum = value.get("ageEnd", value.get("AgeEnd"))
         if minimum is None and maximum is None:
             return ""
         if minimum == maximum:
